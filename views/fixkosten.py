@@ -1,0 +1,258 @@
+import streamlit as st
+import pandas as pd
+import uuid
+from datetime import datetime, date
+from core.parsing import parse_date_swiss_fallback
+from logic.storage_fixkosten import load_fixkosten, update_fixkosten_row, delete_fixkosten_row
+from core.utils import chf_format
+
+def show():
+    st.header("📃 Fixkosten verwalten")
+
+    # Session-State für die Filtereinstellungen und Aktualisierungen
+    if "nur_aktive_fixkosten" not in st.session_state:
+        st.session_state.nur_aktive_fixkosten = True
+    if "fixkosten_aktualisiert" not in st.session_state:
+        st.session_state.fixkosten_aktualisiert = False
+    
+    if st.session_state.fixkosten_aktualisiert:
+        st.session_state.fixkosten_aktualisiert = False
+        st.rerun()
+
+    # ➕ Neue Fixkosten hinzufügen
+    with st.form("fixkosten_form"):
+        st.subheader("➕ Neue Fixkosten hinzufügen")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            name = st.text_input("Bezeichnung (neu)")
+        with col2:
+            betrag = st.number_input("Betrag (CHF)", min_value=0.0, step=100.0, format="%.2f")
+        with col3:
+            rhythmus = st.selectbox("Rhythmus", ["monatlich", "quartalsweise", "halbjährlich", "jährlich"], key="neu_rhythmus")
+
+        col4, col5 = st.columns(2)
+        with col4:
+            datum = st.date_input("Startdatum", value=date.today(), key="neu_start")
+        with col5:
+            enddatum = st.date_input("Enddatum (optional)", value=None, key="neu_end")
+            
+        submitted = st.form_submit_button("✅ Hinzufügen")
+
+        if submitted:
+            if not name.strip():
+                st.error("❌ Bitte gib eine Bezeichnung ein.")
+                return
+                
+            if betrag <= 0:
+                st.error("❌ Bitte gib einen gültigen Betrag ein.")
+                return
+                
+            try:
+                new_entry = {
+                    "id": str(uuid.uuid4()),
+                    "name": name.strip(),
+                    "betrag": float(betrag),
+                    "rhythmus": rhythmus,
+                    "start": datum,
+                    "enddatum": enddatum if enddatum != datum else None
+                }
+                update_fixkosten_row(new_entry)
+                st.success("✅ Fixkosten hinzugefügt")
+                st.session_state.fixkosten_aktualisiert = True
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Fehler beim Hinzufügen: {e}")
+
+    st.markdown("---")
+
+    # 📄 Bestehende Einträge anzeigen und filtern
+    df = load_fixkosten()
+    if df.empty:
+        st.info("Noch keine Fixkosten erfasst.")
+        return
+
+    # Daten vorbereiten
+    df["start"] = pd.to_datetime(df["start"], errors="coerce")
+    df["enddatum"] = pd.to_datetime(df.get("enddatum", None), errors="coerce")
+    
+    # Filter-Optionen
+    col_filter1, col_filter2 = st.columns(2)
+    with col_filter1:
+        filter_rhythmus = st.multiselect(
+            "Nach Rhythmus filtern:", 
+            options=["monatlich", "quartalsweise", "halbjährlich", "jährlich"],
+            default=[]
+        )
+    with col_filter2:
+        # Verwende Callback-Funktion, um den Wert im Session-State zu aktualisieren
+        def on_filter_change():
+            st.session_state.nur_aktive_fixkosten = not st.session_state.nur_aktive_fixkosten
+            
+        aktiv_filter = st.checkbox(
+            "Nur aktive Fixkosten anzeigen", 
+            value=st.session_state.nur_aktive_fixkosten,
+            key="aktiv_filter_checkbox",
+            on_change=on_filter_change
+        )
+    
+    # Daten filtern
+    filtered_df = df.copy()
+    
+    if filter_rhythmus:
+        filtered_df = filtered_df[filtered_df["rhythmus"].isin(filter_rhythmus)]
+    
+    # Aktiv-Filter anwenden
+    if st.session_state.nur_aktive_fixkosten:
+        heute = pd.Timestamp(date.today())
+        aktive_df = filtered_df[(filtered_df["enddatum"].isna()) | (filtered_df["enddatum"] > heute)]
+        
+        # Info anzeigen, wie viele gefiltert wurden
+        inactive_count = len(filtered_df) - len(aktive_df)
+        if inactive_count > 0:
+            st.info(f"{inactive_count} beendete Fixkosten werden nicht angezeigt. Deaktiviere den Filter, um alle zu sehen.")
+        
+        filtered_df = aktive_df
+    
+    # Nach Namen sortieren
+    filtered_df = filtered_df.sort_values("name")
+    
+    # Gesamtkosten anzeigen
+    st.subheader(f"Aktuelle monatliche Fixkosten: {chf_format(calculate_monthly_costs(df))}")
+
+    # Bestehenden Einträge anzeigen
+    for idx, row in filtered_df.iterrows():
+        # Format für den Expander-Titel
+        heute = pd.Timestamp(date.today())
+        
+        # Überprüfung, ob der Eintrag aktiv ist
+        ist_aktiv = pd.isna(row["enddatum"]) or row["enddatum"] > heute
+        
+        if ist_aktiv:
+            status = "aktiv"
+        else:
+            status = f"bis {row['enddatum'].strftime('%d.%m.%Y')}"
+            
+        expander_title = f"{row['name']} – {chf_format(row['betrag'])} ({row['rhythmus']}, {status})"
+        row_id = str(row['id'])
+        
+        with st.expander(expander_title, expanded=False):
+            # Form für jede Fixkosten-Zeile
+            with st.form(key=f"form_{row_id}"):
+                # 🔹 Zeile 1: Name, Betrag, Rhythmus
+                col1, col2, col3 = st.columns(3)
+                name = col1.text_input("Bezeichnung", row["name"], key=f"name_{row_id}")
+                betrag = col2.number_input("Betrag (CHF)", value=float(row["betrag"]), min_value=0.0, step=100.0, format="%.2f", key=f"betrag_{row_id}")
+                rhythmus = col3.selectbox(
+                    "Rhythmus",
+                    ["monatlich", "quartalsweise", "halbjährlich", "jährlich"],
+                    index=["monatlich", "quartalsweise", "halbjährlich", "jährlich"].index(row["rhythmus"]),
+                    key=f"rhythmus_{row_id}"
+                )
+
+                # 🔹 Zeile 2: Start, Enddatum
+                col4, col5 = st.columns(2)
+                start = col4.date_input("Startdatum", value=row["start"].date(), key=f"start_{row_id}")
+                
+                end_value = row["enddatum"].date() if pd.notna(row["enddatum"]) else None
+                enddatum = col5.date_input("Enddatum (optional)", value=end_value, key=f"end_{row_id}")
+                
+                # Buttons basierend auf dem Status anzeigen
+                if ist_aktiv:  # Aktiver Eintrag
+                    save_col, stop_col = st.columns(2)
+                    with save_col:
+                        submitted = st.form_submit_button("💾 Änderungen speichern")
+                    with stop_col:
+                        stopped = st.form_submit_button("🛑 Fixkosten beenden")
+                    reaktivieren = False
+                else:  # Beendeter Eintrag
+                    save_col, reaktivieren_col = st.columns(2)
+                    with save_col:
+                        submitted = st.form_submit_button("💾 Änderungen speichern")
+                    with reaktivieren_col:
+                        reaktivieren = st.form_submit_button("🔄 Fixkosten reaktivieren")
+                    stopped = False
+                
+                if submitted or stopped or reaktivieren:
+                    try:
+                        # Bestimme das Enddatum basierend auf der Aktion
+                        if stopped:
+                            end_date = date.today()
+                        elif reaktivieren:
+                            end_date = None  # Reaktivieren setzt das Enddatum auf None
+                        else:
+                            end_date = enddatum
+                        
+                        # Eintrag aktualisieren
+                        changed_row = {
+                            "id": row_id,
+                            "name": name.strip(),
+                            "betrag": float(betrag),
+                            "rhythmus": rhythmus,
+                            "start": start,
+                            "enddatum": end_date
+                        }
+                        
+                        update_fixkosten_row(changed_row)
+                        
+                        # Erfolgsrückmeldung
+                        if stopped:
+                            st.success(f"✅ Fixkosten gestoppt per {date.today().strftime('%d.%m.%Y')}")
+                            # Bei Beendigung den Filter deaktivieren, damit der Eintrag sichtbar bleibt
+                            if st.session_state.nur_aktive_fixkosten:
+                                st.session_state.nur_aktive_fixkosten = False
+                                st.info("Der Filter 'Nur aktive Fixkosten anzeigen' wurde deaktiviert, damit du den beendeten Eintrag sehen kannst.")
+                        elif reaktivieren:
+                            st.success("✅ Fixkosten erfolgreich reaktiviert")
+                        else:
+                            st.success("✅ Änderungen gespeichert")
+                            
+                        st.session_state.fixkosten_aktualisiert = True
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"❌ Fehler beim Speichern: {e}")
+            
+            # Löschen-Button außerhalb des Forms
+            if st.button("🗑️ Fixkosten löschen", key=f"delete_{row_id}"):
+                st.session_state[f"confirm_delete_{row_id}"] = True
+                st.rerun()
+                
+            if st.session_state.get(f"confirm_delete_{row_id}", False):
+                st.warning("⚠️ Willst du diesen Fixkosten-Eintrag wirklich löschen?")
+                confirm_col1, confirm_col2 = st.columns(2)
+                with confirm_col1:
+                    if st.button("❌ Ja, löschen", key=f"confirm_yes_{row_id}"):
+                        if delete_fixkosten_row(row_id):
+                            st.success("✅ Fixkosten gelöscht")
+                            if f"confirm_delete_{row_id}" in st.session_state:
+                                del st.session_state[f"confirm_delete_{row_id}"]
+                            st.session_state.fixkosten_aktualisiert = True
+                            st.rerun()
+                        else:
+                            st.error("❌ Löschen fehlgeschlagen")
+                with confirm_col2:
+                    if st.button("Abbrechen", key=f"confirm_no_{row_id}"):
+                        if f"confirm_delete_{row_id}" in st.session_state:
+                            del st.session_state[f"confirm_delete_{row_id}"]
+                        st.rerun()
+                
+def calculate_monthly_costs(df):
+    """Berechnet die aktuellen monatlichen Gesamtkosten aller aktiven Fixkosten."""
+    total = 0.0
+    heute = pd.Timestamp(date.today())
+    
+    for _, row in df.iterrows():
+        if pd.isna(row["enddatum"]) or row["enddatum"] > heute:
+            betrag = float(row["betrag"])
+            
+            # Betrag je nach Rhythmus umrechnen
+            if row["rhythmus"] == "monatlich":
+                total += betrag
+            elif row["rhythmus"] == "quartalsweise":
+                total += betrag / 3
+            elif row["rhythmus"] == "halbjährlich":
+                total += betrag / 6
+            elif row["rhythmus"] == "jährlich":
+                total += betrag / 12
+    
+    return total
