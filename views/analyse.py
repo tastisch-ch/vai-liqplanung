@@ -452,7 +452,7 @@ def show():
         st.info("Überspringe Tagesentwicklung aufgrund von Datenstruktur-Problemen.")
     
     # Vollständig überarbeitete Fixkosten-Analyse
-    if show_fixkosten and "Kategorie" in df.columns:
+    if show_fixkosten:
         try:
             st.subheader("💼 Fixkosten-Analyse")
             
@@ -618,57 +618,99 @@ def show():
             st.info("Überspringe Fixkosten-Analyse aufgrund von Datenstruktur-Problemen.")
             
     # Lohnkosten-Analyse (falls aktiviert)
-    if show_loehne and "Kategorie" in df.columns:
+    if show_loehne:
         try:
             st.subheader("💰 Lohnkosten-Analyse")
             
-            # Lohnkosten filtern
-            lohn_data = df[df["Kategorie"] == "Lohn"].copy()
+            # Aktuelle Lohndaten abrufen
+            aktuelle_loehne = get_aktuelle_loehne()
             
-            if not lohn_data.empty:
-                # Extrahiere den Mitarbeiternamen aus den Details
-                def extract_mitarbeiter(details):
-                    if isinstance(details, str) and details.startswith("Lohn "):
-                        return details.replace("Lohn ", "").strip()
-                    return details
+            if aktuelle_loehne:
+                # Für die Anzeige vorbereiten
+                df_loehne = pd.DataFrame(aktuelle_loehne)
                 
-                lohn_data["Mitarbeiter"] = lohn_data["Details"].apply(extract_mitarbeiter)
+                # Formatierung für die Anzeige
+                df_loehne["Betrag_Anzeige"] = df_loehne["Betrag"].apply(lambda x: chf_format(x))
                 
-                # Gruppieren nach Mitarbeiter
-                lohn_summary = lohn_data.groupby("Mitarbeiter")["Amount"].sum().reset_index()
-                lohn_summary = lohn_summary.sort_values("Amount")
+                # Monatliche Gesamtsumme berechnen
+                summe_monatlich = sum(float(lohn["Betrag"]) for lohn in aktuelle_loehne)
                 
-                # Formatiere die Beträge
-                lohn_summary["Formatierter Betrag"] = lohn_summary["Amount"].apply(lambda x: chf_format(abs(x)))
-                
-                # Anzeige der Lohnkosten-Übersicht
+                # Anzeige der aktuellen Lohnkosten
+                st.markdown("#### Aktuelle Lohnkosten")
                 st.dataframe(
-                    lohn_summary[["Mitarbeiter", "Formatierter Betrag"]].rename(
-                        columns={"Formatierter Betrag": "Lohnkosten (Zeitraum)"}
+                    df_loehne[["Mitarbeiter", "Betrag_Anzeige"]].rename(
+                        columns={"Betrag_Anzeige": "Lohn"}
                     ),
                     use_container_width=True
                 )
                 
-                # Balkendiagramm der Lohnkosten nach Mitarbeiter
+                st.markdown(f"**Monatliche Lohnkosten-Gesamtbelastung: {chf_format(summe_monatlich)}**")
+                st.markdown(f"**Auszahlung erfolgt am 25. des Monats**")
+                
+                # Balkendiagramm der Löhne pro Mitarbeiter
+                bar_data = [{"name": row["Mitarbeiter"], "value": row["Betrag"]} for _, row in df_loehne.iterrows()]
+                
                 bar_chart = {
                     "tooltip": {"trigger": "axis"},
                     "xAxis": {
                         "type": "category",
-                        "data": lohn_summary["Mitarbeiter"].tolist(),
-                        "axisLabel": {"interval": 0, "rotate": 45}
+                        "data": [item["name"] for item in bar_data]
                     },
                     "yAxis": {"type": "value"},
                     "series": [
                         {
-                            "name": "Lohnkosten",
+                            "name": "Monatlicher Lohn",
                             "type": "bar",
-                            "data": [abs(x) for x in lohn_summary["Amount"].tolist()],
+                            "data": [item["value"] for item in bar_data],
                             "itemStyle": {"color": "#5470C6"}
                         }
                     ]
                 }
                 
-                st_echarts(options=bar_chart, height="400px")
+                st_echarts(options=bar_chart, height="300px")
+                
+                # Prozentuale Verteilung anzeigen
+                st.markdown("#### Lohnverteilung")
+                
+                # Pie-Chart für die Lohnverteilung
+                pie_data = [{"name": row["Mitarbeiter"], "value": row["Betrag"]} for _, row in df_loehne.iterrows()]
+                
+                pie_chart = {
+                    "tooltip": {
+                        "trigger": "item", 
+                        "formatter": "{a} <br/>{b}: {c} CHF ({d}%)"
+                    },
+                    "legend": {
+                        "orient": "vertical", 
+                        "left": "left", 
+                        "data": [item["name"] for item in pie_data]
+                    },
+                    "series": [
+                        {
+                            "name": "Lohnverteilung",
+                            "type": "pie",
+                            "radius": ["30%", "70%"],
+                            "avoidLabelOverlap": False,
+                            "label": {
+                                "show": True,
+                                "formatter": "{b}: {c} CHF ({d}%)"
+                            },
+                            "emphasis": {
+                                "label": {
+                                    "show": True,
+                                    "fontSize": "18",
+                                    "fontWeight": "bold"
+                                }
+                            },
+                            "labelLine": {"show": True},
+                            "data": pie_data
+                        }
+                    ]
+                }
+                
+                st_echarts(options=pie_chart, height="400px")
+            else:
+                st.info("Keine aktuellen Lohndaten verfügbar.")
         except Exception as e:
             st.error(f"Fehler bei der Lohnkosten-Analyse: {e}")
             st.info("Überspringe Lohnkosten-Analyse aufgrund von Datenstruktur-Problemen.")
