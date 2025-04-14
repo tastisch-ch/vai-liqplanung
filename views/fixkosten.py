@@ -15,6 +15,21 @@ def show():
     if "fixkosten_aktualisiert" not in st.session_state:
         st.session_state.fixkosten_aktualisiert = False
     
+    # Callback-Funktion für das Zurücksetzen der Eingabefelder
+    def reset_input_fields():
+        st.session_state.neu_name = ""
+        st.session_state.neu_betrag = 0.0
+    
+    # Erfolgs-Callback: Eingabefelder zurücksetzen und andere Aktionen ausführen
+    def on_success_add():
+        reset_input_fields()
+        st.session_state.fixkosten_aktualisiert = True
+        st.success("✅ Fixkosten hinzugefügt")
+        # Statt eines sofortigen Reruns hier eine kleine Verzögerung
+        import time
+        time.sleep(0.8)  # Erfolgsmeldung für 0.8 Sekunden anzeigen
+        st.rerun()
+    
     if st.session_state.fixkosten_aktualisiert:
         st.session_state.fixkosten_aktualisiert = False
         st.rerun()
@@ -24,9 +39,15 @@ def show():
         st.subheader("➕ Neue Fixkosten hinzufügen")
         col1, col2, col3 = st.columns(3)
         with col1:
-            name = st.text_input("Bezeichnung (neu)")
+            # Eingabe mit Key und Standardwert "" für leeres Feld
+            if "neu_name" not in st.session_state:
+                st.session_state.neu_name = ""
+            name = st.text_input("Bezeichnung (neu)", key="neu_name")
         with col2:
-            betrag = st.number_input("Betrag (CHF)", min_value=0.0, step=100.0, format="%.2f")
+            # Eingabe mit Key und Standardwert 0.0 für leeres Feld
+            if "neu_betrag" not in st.session_state:
+                st.session_state.neu_betrag = 0.0
+            betrag = st.number_input("Betrag (CHF)", min_value=0.0, step=100.0, format="%.2f", key="neu_betrag")
         with col3:
             rhythmus = st.selectbox("Rhythmus", ["monatlich", "quartalsweise", "halbjährlich", "jährlich"], key="neu_rhythmus")
 
@@ -57,9 +78,10 @@ def show():
                     "enddatum": enddatum if enddatum != datum else None
                 }
                 update_fixkosten_row(new_entry)
-                st.success("✅ Fixkosten hinzugefügt")
-                st.session_state.fixkosten_aktualisiert = True
-                st.rerun()
+                
+                # Nach erfolgreicher Erstellung die Erfolgs-Callback-Funktion aufrufen
+                on_success_add()
+                
             except Exception as e:
                 st.error(f"❌ Fehler beim Hinzufügen: {e}")
 
@@ -205,6 +227,10 @@ def show():
                             st.success("✅ Fixkosten erfolgreich reaktiviert")
                         else:
                             st.success("✅ Änderungen gespeichert")
+                        
+                        # Kurze Verzögerung für die Erfolgsmeldung
+                        import time
+                        time.sleep(0.8)
                             
                         st.session_state.fixkosten_aktualisiert = True
                         st.rerun()
@@ -224,6 +250,11 @@ def show():
                     if st.button("❌ Ja, löschen", key=f"confirm_yes_{row_id}"):
                         if delete_fixkosten_row(row_id):
                             st.success("✅ Fixkosten gelöscht")
+                            
+                            # Kurze Verzögerung für die Erfolgsmeldung
+                            import time
+                            time.sleep(0.8)
+                            
                             if f"confirm_delete_{row_id}" in st.session_state:
                                 del st.session_state[f"confirm_delete_{row_id}"]
                             st.session_state.fixkosten_aktualisiert = True

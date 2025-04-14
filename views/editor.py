@@ -52,7 +52,9 @@ def show():
     
     # Editable DataFrame vorbereiten
     editable_df = df_filtered[["id", "date", "details", "amount", "direction", "modified"]].copy()
-    editable_df["date"] = editable_df["date"].dt.strftime("%d.%m.%Y")
+    
+    # Behandle die date-Spalte richtig
+    editable_df["date"] = editable_df["date"].dt.date  # Konvertiere datetime in date 
     editable_df["modified"] = editable_df["modified"].fillna(False)
     
     # Spalten für die Anzeige benennen
@@ -66,24 +68,23 @@ def show():
     # Anzeige der editierbaren Tabelle mit mehr Platz
     st.subheader("Buchungen bearbeiten")
     
-    # Hilfetexte einklappen
-    with st.expander("ℹ️ Hilfe zur Bearbeitung"):
+    # Hilfetexte einklappen (default geschlossen)
+    with st.expander("ℹ️ Hilfe zur Bearbeitung", expanded=False):
         st.markdown("""
         ### Tipps zur Bearbeitung:
-        1. **Datum**: Verwende das Format TT.MM.JJJJ (z.B. 15.04.2025)
-        2. **Betrag**: Gib den Betrag als Zahl ein (z.B. 150.00)
+        1. **Datum**: Klicke auf das Datum, um einen Datepicker zu öffnen
+        2. **Betrag**: Gib den Betrag als Zahl ein (wird automatisch im CHF-Format angezeigt)
         3. **Art**: Wähle zwischen 'Incoming' (Einnahme) und 'Outgoing' (Ausgabe)
         4. **Hinzufügen**: Neue Zeilen werden automatisch hinzugefügt, wenn du in der letzten Zeile schreibst
         5. **Speichern**: Änderungen werden automatisch gespeichert, wenn du eine andere Zelle auswählst
         """)
     
     # Tabelle mit maximaler Höhe anzeigen
-    # KORRIGIERT: Datum bleibt als Texteingabefeld und wird nicht als DateColumn konfiguriert
     edited_df = st.data_editor(
         editable_display,
         num_rows="dynamic",
         use_container_width=True,
-        height=700,  # Höhe erhöht für mehr sichtbare Einträge
+        height=700,  # Großzügige Höhe für viele Einträge
         hide_index=True,
         column_config={
             "Art": st.column_config.SelectboxColumn(
@@ -96,10 +97,14 @@ def show():
                 format="%.2f CHF", 
                 help="Betrag in CHF"
             ),
-            # Textfeld statt DateColumn für Datum
-            "Datum": st.column_config.TextColumn(
+            # Verwende DateColumn mit korrekten dtype
+            "Datum": st.column_config.DateColumn(
                 "Datum",
-                help="Format: TT.MM.JJJJ"
+                help="Datum der Buchung",
+                format="DD.MM.YYYY",
+                min_value=date(2020, 1, 1),
+                max_value=date(2030, 12, 31),
+                step=1
             )
         }
     )
@@ -109,7 +114,9 @@ def show():
         try:
             # Spalten zurückwandeln
             edited_df.columns = ["date", "details", "amount", "direction"]
-            edited_df["date"] = pd.to_datetime(edited_df["date"], format="%d.%m.%Y", errors="coerce").dt.normalize()
+            
+            # Daten konvertieren
+            # Datum ist bereits ein date-Objekt, muss nicht geparst werden
             edited_df["amount"] = pd.to_numeric(edited_df["amount"], errors="coerce")
             edited_df = edited_df.dropna(subset=["date", "amount"]).reset_index(drop=True)
 
@@ -128,8 +135,11 @@ def show():
                 edited = edited_df.iloc[idx]
 
                 # Prüfe ob sich etwas geändert hat
+                # Konvertiere date zu date für Vergleich
+                original_date = original["date"].date() if hasattr(original["date"], "date") else original["date"]
+                
                 is_modified = (
-                    original["date"] != edited["date"]
+                    original_date != edited["date"]
                     or original["details"] != edited["details"]
                     or original["direction"] != edited["direction"]
                     or abs(original["amount"] - edited["amount"]) > 0.01
@@ -137,9 +147,12 @@ def show():
 
                 if is_modified:
                     try:
+                        # Konvertiere date zu string im Format YYYY-MM-DD
+                        date_str = edited["date"].strftime("%Y-%m-%d")
+                        
                         update_buchung_by_id(
                             id=original["id"],
-                            date=edited["date"].strftime("%Y-%m-%d"),
+                            date=date_str,
                             details=edited["details"],
                             amount=round(edited["amount"], 2),
                             direction=edited["direction"]
@@ -162,7 +175,7 @@ def show():
                 st.success(f"✔️ {len(modified_ids)} Änderung(en) gespeichert.")
                 
                 # Zeige geänderte Zeilen an
-                with st.expander("Geänderte Zeilen anzeigen"):
+                with st.expander("Geänderte Zeilen anzeigen", expanded=False):
                     for idx in modified_rows:
                         st.write(f"Zeile {idx+1}: {edited_df.iloc[idx]['details']}")
             else:
@@ -175,4 +188,4 @@ def show():
 
         except Exception as e:
             st.error(f"❌ Fehler beim Verarbeiten: {e}")
-            st.warning("Wenn Datumswerte Probleme verursachen, stelle sicher, dass sie im Format TT.MM.JJJJ eingegeben werden.")
+            st.exception(e)  # Zeige vollständigen Fehler für Debugging
