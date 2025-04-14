@@ -17,16 +17,30 @@ def show():
     default_start = date.today()
     default_end = default_start + timedelta(days=270)  # Standard: 9 Monate
     
+    # Session-State für Datumswerte verwenden
+    if "analyse_start_date" not in st.session_state:
+        st.session_state.analyse_start_date = default_start
+    if "analyse_end_date" not in st.session_state:
+        st.session_state.analyse_end_date = default_end
+    
+    # Funktion für den Button
+    def set_three_months():
+        st.session_state.analyse_start_date = date.today()
+        st.session_state.analyse_end_date = date.today() + timedelta(days=90)
+    
     col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
-        start_date = st.date_input("Startdatum für Analyse", value=default_start)
+        start_date = st.date_input("Startdatum für Analyse", 
+                                   value=st.session_state.analyse_start_date,
+                                   key="start_date_input")
+        st.session_state.analyse_start_date = start_date
     with col2:
-        end_date = st.date_input("Enddatum für Analyse", value=default_end)
+        end_date = st.date_input("Enddatum für Analyse", 
+                                 value=st.session_state.analyse_end_date,
+                                 key="end_date_input")
+        st.session_state.analyse_end_date = end_date
     with col3:
-        if st.button("Aktuelle 3 Monate anzeigen"):
-            start_date = date.today()
-            end_date = start_date + timedelta(days=90)
-            st.rerun()
+        st.button("Aktuelle 3 Monate anzeigen", on_click=set_three_months)
     
     # Optionen für die Anzeige
     col_options = st.columns(4)
@@ -715,71 +729,6 @@ def show():
             st.error(f"Fehler bei der Lohnkosten-Analyse: {e}")
             st.info("Überspringe Lohnkosten-Analyse aufgrund von Datenstruktur-Problemen.")
 
-        # Session-State für die Single-Open Expander Funktionalität
-        if "open_expander" not in st.session_state:
-            st.session_state.open_expander = None
-
-        # Callback-Funktion für Expander
-        def toggle_expander(expander_id):
-            """
-            Callback-Funktion für Single-Open Expander Funktionalität.
-            Sorgt dafür, dass immer nur ein Expander geöffnet ist.
-            """
-            if st.session_state.open_expander == expander_id:
-                # Wenn der gleiche Expander erneut angeklickt wird, schließe ihn
-                st.session_state.open_expander = None
-            else:
-                # Ansonsten setze den angeklickten Expander als geöffnet
-                st.session_state.open_expander = expander_id
-
-        # Und dann die Expander so verwenden (Beispiel):
-
-        # Anstatt:
-        # with st.expander(expander_title, expanded=False):
-        #     [Inhalt des Expanders]
-
-        # Verwende:
-        is_open = st.session_state.open_expander == unique_id
-        with st.expander(expander_title, expanded=is_open):
-            # Hinweis: Um den Toggle-Effekt zu erzielen, muss man einen Button im Expander platzieren
-            if st.button("Schließen", key=f"close_{unique_id}"):
-                toggle_expander(unique_id)
-            
-            # [Inhalt des Expanders]
-
-        # Beispiel für Fixkosten:
-        is_open = st.session_state.open_expander == f"fixkosten_{row_id}"
-        with st.expander(expander_title, expanded=is_open):
-            # Callback für Schließen-Button (oder über andere Interaktion)
-            if st.button("Schließen", key=f"close_fixkosten_{row_id}", use_container_width=True):
-                toggle_expander(f"fixkosten_{row_id}")
-            
-            # Restlicher Expander-Inhalt...
-            
-        # Beispiel für Mitarbeiter:
-        is_open = st.session_state.open_expander == f"mitarbeiter_{m_id}"
-        with st.expander(expander_title, expanded=is_open):
-            # Callback für Schließen-Button
-            if st.button("Schließen", key=f"close_mitarbeiter_{m_id}", use_container_width=True):
-                toggle_expander(f"mitarbeiter_{m_id}")
-            
-            # Restlicher Expander-Inhalt...
-
-        # Beispiel für Simulation:
-        is_open = st.session_state.open_expander == f"simulation_{sim_id}"
-        with st.expander(expander_title, expanded=is_open):
-            # Callback für Schließen-Button
-            if st.button("Schließen", key=f"close_simulation_{sim_id}", use_container_width=True):
-                toggle_expander(f"simulation_{sim_id}")
-            
-            # Restlicher Expander-Inhalt...
-
-        # Alternative Implementierung ohne Button (über on_click der Expander)
-        # HINWEIS: Diese funktioniert möglicherweise nicht so zuverlässig, weil Streamlit
-        # keinen direkten on_click-Handler für Expander bietet.
-
-        if st.checkbox("", value=st.session_state.open_expander == expander_id, 
-                    key=f"expander_toggle_{expander_id}", label_visibility="collapsed",
-                    on_change=lambda: toggle_expander(expander_id)):
-            # Expander-Inhalt hier...
-            st.write("Expander Inhalt")
+    # Session-State für die Single-Open Expander Funktionalität
+    if "open_expander" not in st.session_state:
+        st.session_state.open_expander = None
