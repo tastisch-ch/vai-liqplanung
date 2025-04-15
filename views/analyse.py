@@ -9,8 +9,17 @@ from logic.storage_fixkosten import convert_fixkosten_to_buchungen, load_fixkost
 from logic.storage_simulation import convert_simulationen_to_buchungen
 from logic.storage_mitarbeiter import convert_loehne_to_buchungen, get_aktuelle_loehne
 from logic.storage_buchungen import load_buchungen
+from core.auth import prüfe_session_gültigkeit, log_user_activity
 
 def show():
+    # Authentifizierungsprüfung
+    if not prüfe_session_gültigkeit():
+        st.warning("Bitte melden Sie sich an, um auf diesen Bereich zuzugreifen")
+        st.stop()
+        
+    # Benutzer-ID für Audit-Protokollierung 
+    user_id = st.session_state.user.id
+    
     st.header("📈 Analyse")
 
     # Planungszeitraum festlegen
@@ -27,6 +36,8 @@ def show():
     def set_three_months():
         st.session_state.analyse_start_date = date.today()
         st.session_state.analyse_end_date = date.today() + timedelta(days=90)
+        # Aktivität protokollieren
+        log_user_activity("Analysezeitraum geändert", {"zeitraum": "3 Monate"})
     
     col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
@@ -53,11 +64,11 @@ def show():
     with col_options[3]:
         show_daily_points = st.checkbox("Alle Tage anzeigen", value=True)
 
-    # Daten laden - auch wenn keine Daten im Editor bearbeitet wurden
+    # Daten laden - keine Benutzerfilterung
     if "edited_df" in st.session_state:
         df = st.session_state.edited_df.copy()
     else:
-        df = load_buchungen()
+        df = load_buchungen()  # Keine Benutzerfilterung
         if df is None or df.empty:
             # Leeren DataFrame erstellen für die weitere Verarbeitung
             df = pd.DataFrame(columns=["date", "details", "amount", "direction"])
@@ -77,7 +88,8 @@ def show():
     # Fixkosten laden, wenn aktiviert
     if show_fixkosten:
         try:
-            fixkosten_df = convert_fixkosten_to_buchungen(start_date, end_date)
+            # user_id für Audit-Trails, nicht für Filterung
+            fixkosten_df = convert_fixkosten_to_buchungen(start_date, end_date, user_id=user_id)
             
             if not fixkosten_df.empty:
                 # Sicherstellen, dass die Spalten kompatibel sind
@@ -99,13 +111,17 @@ def show():
                 
                 df = combined_df
                 st.success(f"✅ {len(fixkosten_df)} Fixkosten in die Analyse integriert")
+                
+                # Aktivität protokollieren
+                log_user_activity("Fixkosten in Analyse integriert", {"anzahl": len(fixkosten_df)})
         except Exception as e:
             st.error(f"❌ Fehler beim Laden der Fixkosten: {e}")
 
     # Simulationen laden, wenn aktiviert
     if show_simulationen:
         try:
-            simulation_df = convert_simulationen_to_buchungen()
+            # user_id für Audit-Trails, nicht für Filterung
+            simulation_df = convert_simulationen_to_buchungen(user_id=user_id)
             
             if not simulation_df.empty:
                 # Spaltennamen normalisieren
@@ -128,13 +144,17 @@ def show():
                 
                 df = combined_df
                 st.success(f"✅ {len(simulation_df)} Simulationen in die Analyse integriert")
+                
+                # Aktivität protokollieren
+                log_user_activity("Simulationen in Analyse integriert", {"anzahl": len(simulation_df)})
         except Exception as e:
             st.error(f"❌ Fehler beim Laden der Simulationen: {e}")
 
     # Lohndaten laden, wenn aktiviert
     if show_loehne:
         try:
-            lohn_df = convert_loehne_to_buchungen(start_date, end_date)
+            # user_id für Audit-Trails, nicht für Filterung
+            lohn_df = convert_loehne_to_buchungen(start_date, end_date, user_id=user_id)
             
             if not lohn_df.empty:
                 # Spaltennamen normalisieren
@@ -149,12 +169,19 @@ def show():
                 # Sicherstellen, dass Direction immer outgoing ist für Löhne
                 lohn_df["Direction"] = "Outgoing"
                 
+                # KORREKTUR: Sicherstellen, dass keine "modified" Spalte existiert bei Lohnbuchungen
+                if "modified" in lohn_df.columns:
+                    lohn_df = lohn_df.drop(columns=["modified"])
+                
                 # Kombiniere die Dataframes
                 combined_df = pd.concat([df, lohn_df], ignore_index=True)
                 combined_df = combined_df.sort_values("Date").reset_index(drop=True)
                 
                 df = combined_df
                 st.success(f"✅ {len(lohn_df)} Lohnbuchungen in die Analyse integriert")
+                
+                # Aktivität protokollieren
+                log_user_activity("Lohndaten in Analyse integriert", {"anzahl": len(lohn_df)})
         except Exception as e:
             st.error(f"❌ Fehler beim Laden der Lohndaten: {e}")
 
@@ -163,6 +190,7 @@ def show():
         st.warning("Keine Daten für die Analyse verfügbar.")
         return
 
+    # Rest der Funktion bleibt unverändert...
     # Beträge entsprechend der Richtung anpassen
     df["Amount"] = df.apply(
         lambda row: -abs(float(row["Amount"])) if row["Direction"].lower() == "outgoing" else abs(float(row["Amount"])),
@@ -204,6 +232,7 @@ def show():
                 }), 
                 use_container_width=True
             )
+    
     
     # Monatsübersicht
     st.subheader("💡 Monatsübersicht (Diagramm)")
@@ -342,6 +371,13 @@ def show():
                 chart["dataZoom"][1]["end"] = int(3 / len(months) * 100)
             
             st_echarts(options=chart, height="500px")
+            
+            # Aktivität protokollieren
+            log_user_activity("Monatsübersicht angesehen", {
+                "zeitraum": f"{start_date} bis {end_date}",
+                "kategorien": ["Einnahmen", "Ausgaben (Standard)", "Ausgaben (Fixkosten)", 
+                               "Ausgaben (Simulation)", "Ausgaben (Lohn)", "Kontostand"]
+            })
         else:
             # Fallback ohne Kategorien
             monthly = df.groupby(["Monat", "Direction"])["Amount"].sum().unstack().fillna(0)
@@ -380,6 +416,12 @@ def show():
                 chart["dataZoom"][1]["end"] = int(3 / len(months) * 100)
                 
             st_echarts(options=chart, height="500px")
+            
+            # Aktivität protokollieren
+            log_user_activity("Monatsübersicht angesehen", {
+                "zeitraum": f"{start_date} bis {end_date}",
+                "kategorien": ["Einnahmen", "Ausgaben", "Kontostand"]
+            })
     except Exception as e:
         st.error(f"Fehler bei der Monatsübersicht: {e}")
         st.info("Überspringe Monatsübersicht aufgrund von Datenstruktur-Problemen.")
@@ -461,6 +503,9 @@ def show():
             daily_chart["dataZoom"][1]["end"] = int(90 / total_days * 100)
             
         st_echarts(options=daily_chart, height="500px")
+        
+        # Aktivität protokollieren
+        log_user_activity("Tagesgenaue Liquiditätsentwicklung angesehen", {"zeitraum": f"{start_date} bis {end_date}"})
     except Exception as e:
         st.error(f"Fehler bei der Tagesentwicklung: {e}")
         st.info("Überspringe Tagesentwicklung aufgrund von Datenstruktur-Problemen.")
@@ -471,7 +516,8 @@ def show():
             st.subheader("💼 Fixkosten-Analyse")
             
             # Direktes Laden der Fixkosten aus der Datenbank für eine bessere Analyse
-            fixkosten_raw = load_fixkosten()
+            # Anpassen des Datenladens, um nur Fixkosten des angemeldeten Benutzers zu laden
+            fixkosten_raw = load_fixkosten(user_id=user_id)
             
             if not fixkosten_raw.empty:
                 # Spalten für die Anzeige vorbereiten
@@ -585,6 +631,11 @@ def show():
                     
                     st_echarts(options=pie_chart, height="400px")
                     
+                    # Aktivität protokollieren
+                    log_user_activity("Fixkosten-Analyse angesehen", {
+                        "monatliche_gesamtbelastung": monatliche_summe
+                    })
+                    
                     # Zusätzliche Fixkosten-Analyse für den ausgewählten Zeitraum
                     st.markdown("#### Monatliche Fixkosten-Übersicht")
                     
@@ -637,7 +688,8 @@ def show():
             st.subheader("💰 Lohnkosten-Analyse")
             
             # Aktuelle Lohndaten abrufen
-            aktuelle_loehne = get_aktuelle_loehne()
+            # Anpassen des Datenladens, um nur Lohndaten des angemeldeten Benutzers zu laden
+            aktuelle_loehne = get_aktuelle_loehne(user_id=user_id)
             
             if aktuelle_loehne:
                 # Für die Anzeige vorbereiten
@@ -660,6 +712,11 @@ def show():
                 
                 st.markdown(f"**Monatliche Lohnkosten-Gesamtbelastung: {chf_format(summe_monatlich)}**")
                 st.markdown(f"**Auszahlung erfolgt am 25. des Monats**")
+                
+                # Aktivität protokollieren
+                log_user_activity("Lohnkosten-Analyse angesehen", {
+                    "monatliche_gesamtbelastung": summe_monatlich
+                })
                 
                 # Balkendiagramm der Löhne pro Mitarbeiter
                 bar_data = [{"name": row["Mitarbeiter"], "value": row["Betrag"]} for _, row in df_loehne.iterrows()]
@@ -732,3 +789,14 @@ def show():
     # Session-State für die Single-Open Expander Funktionalität
     if "open_expander" not in st.session_state:
         st.session_state.open_expander = None
+        
+    # Aktivität protokollieren am Ende der Analyse
+    log_user_activity("Analyse abgeschlossen", {
+        "zeitraum": f"{start_date} bis {end_date}",
+        "optionen": {
+            "fixkosten": show_fixkosten,
+            "simulationen": show_simulationen,
+            "loehne": show_loehne,
+            "tagesgenaue_anzeige": show_daily_points
+        }
+    })

@@ -14,8 +14,17 @@ from logic.storage_mitarbeiter import (
 )
 from core.parsing import parse_date_swiss_fallback
 from core.utils import chf_format
+from core.auth import prüfe_session_gültigkeit, log_user_activity
 
 def show():
+    # Authentifizierungsprüfung
+    if not prüfe_session_gültigkeit():
+        st.warning("Bitte melden Sie sich an, um auf diesen Bereich zuzugreifen")
+        st.stop()
+    
+    # Benutzer-ID für Audit-Protokollierung
+    user_id = st.session_state.user.id
+    
     st.header("👥 Mitarbeiter & Lohnverwaltung")
     
     # Session-State für Aktualisierungen
@@ -26,9 +35,14 @@ def show():
         st.session_state.mitarbeiter_aktualisiert = False
         st.rerun()
     
-    # Alle Mitarbeiter laden
+    # Alle Mitarbeiter laden (ohne Benutzerfilterung)
     mitarbeiter_list = load_mitarbeiter()
     
+    # Aktivität protokollieren
+    log_user_activity("Mitarbeiterverwaltung aufgerufen", {
+        "anzahl_mitarbeiter": len(mitarbeiter_list) if mitarbeiter_list else 0
+    })
+
     # Einführung
     with st.expander("ℹ️ Über die Mitarbeiterverwaltung", expanded=False):
         st.markdown("""
@@ -90,13 +104,29 @@ def show():
                         "Betrag": lohn_num
                     }]
                     
-                    # Mitarbeiter hinzufügen
-                    if add_mitarbeiter(name.strip(), lohn_daten):
+                    # Aktuelle Zeit für Timestamps
+                    now = datetime.now().isoformat()
+                    
+                    # Mitarbeiter hinzufügen mit Benutzer-ID
+                    if add_mitarbeiter(name.strip(), lohn_daten, user_id=user_id, created_at=now, updated_at=now):
+                        # Aktivität protokollieren
+                        log_user_activity("Mitarbeiter hinzugefügt", {
+                            "name": name.strip(),
+                            "lohn": lohn_num,
+                            "start": lohn_start.isoformat()
+                        })
+                        
                         st.success(f"✅ Mitarbeiter '{name}' erfolgreich hinzugefügt")
                         st.session_state.mitarbeiter_aktualisiert = True
                         st.rerun()
                     else:
                         st.error("❌ Fehler beim Hinzufügen des Mitarbeiters")
+                        
+                        # Fehler protokollieren
+                        log_user_activity("Fehler beim Hinzufügen von Mitarbeiter", {
+                            "name": name.strip(),
+                            "fehler": "Hinzufügen fehlgeschlagen"
+                        })
                         
                 except ValueError:
                     st.error("❌ Bitte gib einen gültigen Lohnbetrag ein.")
@@ -106,6 +136,11 @@ def show():
     
     # ===== BESTEHENDE MITARBEITER ANZEIGEN =====
     st.subheader("💼 Mitarbeiter verwalten")
+    
+    # Protokollierung der Ansicht
+    log_user_activity("Mitarbeiterverwaltung angesehen", {
+        "anzahl_mitarbeiter": len(mitarbeiter_list) if mitarbeiter_list else 0
+    })
     
     if not mitarbeiter_list:
         st.info("Noch keine Mitarbeiter erfasst. Füge oben einen neuen Mitarbeiter hinzu.")
@@ -166,18 +201,36 @@ def show():
                         if not edit_name.strip():
                             st.error("❌ Der Name darf nicht leer sein.")
                         else:
+                            # Originale Daten für Audit-Logs
+                            original_name = m_name
+                            
                             # Aktualisierte Mitarbeiterdaten
                             updated_data = {
                                 "Name": edit_name.strip(),
-                                "Lohn": mitarbeiter.get("Lohn", [])
+                                "Lohn": mitarbeiter.get("Lohn", []),
+                                "user_id": user_id,  # Benutzer-ID beibehalten
+                                "updated_at": datetime.now().isoformat()  # Aktualisierungszeitstempel
                             }
                             
                             if update_mitarbeiter(m_id, updated_data):
+                                # Aktivität protokollieren
+                                log_user_activity("Mitarbeiter bearbeitet", {
+                                    "id": m_id,
+                                    "original": {"name": original_name},
+                                    "neu": {"name": edit_name.strip()}
+                                })
+                                
                                 st.success("✅ Mitarbeiter-Daten gespeichert")
                                 st.session_state.mitarbeiter_aktualisiert = True
                                 st.rerun()
                             else:
                                 st.error("❌ Fehler beim Speichern der Mitarbeiter-Daten")
+                                
+                                # Fehler protokollieren
+                                log_user_activity("Fehler beim Bearbeiten von Mitarbeiter", {
+                                    "id": m_id,
+                                    "fehler": "Bearbeiten fehlgeschlagen"
+                                })
                 
                 # Lohndaten anzeigen
                 st.markdown("#### 💰 Lohnverlauf")
@@ -275,6 +328,13 @@ def show():
                                 # Lohnbetrag konvertieren
                                 lohn_num = float(edit_betrag.replace("'", "").replace(",", "."))
                                 
+                                # Originale Daten für Audit-Logs
+                                original_lohn = {
+                                    "betrag": float(lohn["Betrag"]),
+                                    "start": lohn_start.isoformat() if hasattr(lohn_start, "isoformat") else str(lohn_start),
+                                    "ende": lohn_ende.isoformat() if lohn_ende and hasattr(lohn_ende, "isoformat") else None
+                                }
+                                
                                 # Aktualisierte Lohndaten
                                 updated_lohn = {
                                     "Start": edit_start.strftime("%Y-%m-%d"),
@@ -282,22 +342,56 @@ def show():
                                     "Betrag": lohn_num
                                 }
                                 
-                                if update_lohn(m_id, selected_lohn_index, updated_lohn):
+                                if update_lohn(m_id, selected_lohn_index, updated_lohn, user_id=user_id):
+                                    # Aktivität protokollieren
+                                    log_user_activity("Lohndaten bearbeitet", {
+                                        "mitarbeiter_id": m_id,
+                                        "mitarbeiter_name": m_name,
+                                        "original": original_lohn,
+                                        "neu": {
+                                            "betrag": lohn_num,
+                                            "start": edit_start.isoformat(),
+                                            "ende": edit_ende.isoformat() if edit_ende else None
+                                        }
+                                    })
+                                    
                                     st.success("✅ Lohndaten gespeichert")
                                     st.session_state.mitarbeiter_aktualisiert = True
                                     st.rerun()
                                 else:
                                     st.error("❌ Fehler beim Speichern der Lohndaten")
+                                    
+                                    # Fehler protokollieren
+                                    log_user_activity("Fehler beim Bearbeiten von Lohndaten", {
+                                        "mitarbeiter_id": m_id,
+                                        "mitarbeiter_name": m_name,
+                                        "fehler": "Bearbeiten fehlgeschlagen"
+                                    })
                             except ValueError:
                                 st.error("❌ Bitte gib einen gültigen Lohnbetrag ein.")
                         
                         if delete_lohn_button:
-                            if delete_lohn(m_id, selected_lohn_index):
+                            if delete_lohn(m_id, selected_lohn_index, user_id=user_id):
+                                # Aktivität protokollieren
+                                log_user_activity("Lohneintrag gelöscht", {
+                                    "mitarbeiter_id": m_id,
+                                    "mitarbeiter_name": m_name,
+                                    "betrag": float(lohn["Betrag"]),
+                                    "start": lohn_start.isoformat() if hasattr(lohn_start, "isoformat") else str(lohn_start)
+                                })
+                                
                                 st.success("✅ Lohneintrag gelöscht")
                                 st.session_state.mitarbeiter_aktualisiert = True
                                 st.rerun()
                             else:
                                 st.error("❌ Fehler beim Löschen des Lohneintrags")
+                                
+                                # Fehler protokollieren
+                                log_user_activity("Fehler beim Löschen von Lohneintrag", {
+                                    "mitarbeiter_id": m_id,
+                                    "mitarbeiter_name": m_name,
+                                    "fehler": "Löschen fehlgeschlagen"
+                                })
                 
                 # Neuen Lohneintrag hinzufügen
                 st.markdown("#### Neuen Lohneintrag hinzufügen")
@@ -348,12 +442,28 @@ def show():
                                     "Betrag": lohn_num
                                 }
                                 
-                                if add_lohn_to_mitarbeiter(m_id, lohn_daten):
+                                if add_lohn_to_mitarbeiter(m_id, lohn_daten, user_id=user_id):
+                                    # Aktivität protokollieren
+                                    log_user_activity("Lohneintrag hinzugefügt", {
+                                        "mitarbeiter_id": m_id,
+                                        "mitarbeiter_name": m_name,
+                                        "betrag": lohn_num,
+                                        "start": new_start.isoformat(),
+                                        "ende": new_ende.isoformat() if new_ende else None
+                                    })
+                                    
                                     st.success("✅ Lohn erfolgreich hinzugefügt")
                                     st.session_state.mitarbeiter_aktualisiert = True
                                     st.rerun()
                                 else:
                                     st.error("❌ Fehler beim Hinzufügen des Lohns")
+                                    
+                                    # Fehler protokollieren
+                                    log_user_activity("Fehler beim Hinzufügen von Lohneintrag", {
+                                        "mitarbeiter_id": m_id,
+                                        "mitarbeiter_name": m_name,
+                                        "fehler": "Hinzufügen fehlgeschlagen"
+                                    })
                             except ValueError:
                                 st.error("❌ Bitte gib einen gültigen Lohnbetrag ein.")
                 
@@ -369,7 +479,13 @@ def show():
                     confirm_col1, confirm_col2 = st.columns(2)
                     with confirm_col1:
                         if st.button("❌ Ja, löschen", key=f"confirm_yes_{m_id}"):
-                            if delete_mitarbeiter(m_id):
+                            if delete_mitarbeiter(m_id, user_id=user_id):
+                                # Aktivität protokollieren
+                                log_user_activity("Mitarbeiter gelöscht", {
+                                    "id": m_id,
+                                    "name": m_name
+                                })
+                                
                                 st.success("✅ Mitarbeiter erfolgreich gelöscht")
                                 if f"confirm_delete_{m_id}" in st.session_state:
                                     del st.session_state[f"confirm_delete_{m_id}"]
@@ -377,6 +493,13 @@ def show():
                                 st.rerun()
                             else:
                                 st.error("❌ Löschen fehlgeschlagen")
+                                
+                                # Fehler protokollieren
+                                log_user_activity("Fehler beim Löschen von Mitarbeiter", {
+                                    "id": m_id,
+                                    "name": m_name,
+                                    "fehler": "Löschen fehlgeschlagen"
+                                })
                     with confirm_col2:
                         if st.button("Abbrechen", key=f"confirm_no_{m_id}"):
                             if f"confirm_delete_{m_id}" in st.session_state:
@@ -387,6 +510,7 @@ def show():
         st.markdown("---")
         st.subheader("📊 Übersicht aktuelle Löhne")
         
+        # Löhne ohne Benutzerfilterung laden
         aktuelle_loehne = get_aktuelle_loehne()
         
         if not aktuelle_loehne:
@@ -420,3 +544,9 @@ def show():
             summe = sum(float(row["Betrag"]) for row in aktuelle_loehne)
             st.markdown(f"**Monatliche Lohnsumme: {chf_format(summe)}**")
             st.markdown(f"**Auszahlung erfolgt am 25. des Monats**")
+            
+            # Übersicht protokollieren
+            log_user_activity("Lohnübersicht angesehen", {
+                "anzahl_loehne": len(aktuelle_loehne),
+                "monatliche_summe": summe
+            })

@@ -1,0 +1,124 @@
+import streamlit as st
+from core.auth import anmelden, abmelden, initialisiere_auth_state, prüfe_session_gültigkeit, passwort_zuruecksetzen
+
+def show():
+    """
+    Login-Seite anzeigen
+    """
+    # Authentifizierungsstatus initialisieren
+    initialisiere_auth_state()
+    
+    # Prüfen, ob die Session noch gültig ist
+    if st.session_state.is_authenticated:
+        prüfe_session_gültigkeit()
+    
+    st.title("🔐 Login")
+    
+    # Statusmeldungen anzeigen (falls vorhanden)
+    if st.session_state.auth_message:
+        message_type = st.session_state.auth_message_type
+        message = st.session_state.auth_message
+        
+        if message_type == "success":
+            st.success(message)
+        elif message_type == "error":
+            st.error(message)
+        elif message_type == "info":
+            st.info(message)
+        elif message_type == "warning":
+            st.warning(message)
+            
+        # Nachricht zurücksetzen
+        st.session_state.auth_message = None
+        st.session_state.auth_message_type = None
+    
+    # Wenn bereits angemeldet, Abmelde-UI anzeigen
+    if st.session_state.is_authenticated and st.session_state.user:
+        logged_in_ui()
+    else:
+        login_form()
+        
+        # Passwort vergessen Link
+        st.markdown("---")
+        forgot_password()
+
+def login_form():
+    """
+    Login-Formular darstellen
+    """
+    with st.form(key="login_form"):
+        email = st.text_input(
+            "E-Mail-Adresse",
+            placeholder="name@beispiel.ch",
+            help="Geben Sie Ihre E-Mail-Adresse ein"
+        )
+        
+        password = st.text_input(
+            "Passwort",
+            type="password",
+            placeholder="Passwort",
+            help="Geben Sie Ihr Passwort ein"
+        )
+        
+        stay_logged_in = st.checkbox(
+            "Angemeldet bleiben",
+            help="Aktivieren Sie diese Option, um für längere Zeit angemeldet zu bleiben"
+        )
+        
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            submit_button = st.form_submit_button(
+                label="Anmelden",
+                use_container_width=True
+            )
+            
+        # Wenn das Formular abgeschickt wurde
+        if submit_button:
+            if not email or not password:
+                st.error("Bitte geben Sie E-Mail und Passwort ein")
+            else:
+                with st.spinner("Anmeldung läuft..."):
+                    anmelden(email, password, stay_logged_in)
+                    # Seite neu laden, um die Änderungen zu übernehmen
+                    st.rerun()
+
+def logged_in_ui():
+    """
+    UI für angemeldete Benutzer
+    """
+    user = st.session_state.user
+    
+    st.success(f"Sie sind angemeldet als: {user.email}")
+    
+    if st.session_state.is_admin:
+        st.info("Sie haben Administratorrechte")
+    
+    if st.button("Abmelden", use_container_width=True):
+        abmelden()
+        st.rerun()
+
+def forgot_password():
+    """
+    Passwort vergessen Funktion
+    """
+    st.subheader("Passwort vergessen?")
+    
+    with st.form(key="reset_form"):
+        email = st.text_input(
+            "E-Mail-Adresse",
+            placeholder="name@beispiel.ch",
+            help="Geben Sie Ihre E-Mail-Adresse ein"
+        )
+        
+        reset_button = st.form_submit_button(
+            label="Passwort zurücksetzen",
+            use_container_width=True
+        )
+        
+        if reset_button:
+            if not email:
+                st.error("Bitte geben Sie Ihre E-Mail-Adresse ein")
+            else:
+                with st.spinner("E-Mail wird gesendet..."):
+                    passwort_zuruecksetzen(email)

@@ -4,16 +4,33 @@ import uuid
 from core.storage import supabase
 from dateutil.relativedelta import relativedelta
 
-def load_fixkosten():
-    """Lädt alle Fixkosten aus der Datenbank."""
+def load_fixkosten(user_id=None):
+    """
+    Lädt alle Fixkosten aus der Datenbank.
+    
+    Args:
+        user_id (str, optional): Benutzer-ID (wird nur für Audit-Trails verwendet, nicht zum Filtern)
+        
+    Returns:
+        pd.DataFrame: DataFrame mit allen Fixkosten
+    """
     response = supabase.table("fixkosten").select("*").execute()
     data = response.data
     if not data:
         return pd.DataFrame()
     return pd.DataFrame(data)
 
-def update_fixkosten_row(row_data):
-    """Aktualisiert oder erstellt einen Fixkosten-Eintrag."""
+def update_fixkosten_row(row_data, user_id=None):
+    """
+    Aktualisiert oder erstellt einen Fixkosten-Eintrag.
+    
+    Args:
+        row_data (dict): Die zu speichernden Fixkosten-Daten
+        user_id (str, optional): Benutzer-ID für Audit-Trails
+        
+    Returns:
+        list: Die gespeicherten Daten oder None bei Fehler
+    """
     try:
         row_id = row_data.get("id")
         data = {
@@ -27,6 +44,13 @@ def update_fixkosten_row(row_data):
                          if row_data.get("enddatum") and hasattr(row_data.get("enddatum"), "strftime") 
                          else row_data.get("enddatum"))
         }
+        
+        # Benutzer-ID für Audit-Trail hinzufügen
+        if user_id:
+            data["user_id"] = user_id
+            
+        # Zeitstempel für Erstellung/Aktualisierung
+        now = datetime.utcnow().isoformat()
         
         print(f"Debugging - Rohdaten: {row_data}")
         print(f"Debugging - Vorbereitete Daten: {data}")
@@ -42,12 +66,17 @@ def update_fixkosten_row(row_data):
                 if not existing_entry.data:
                     print(f"Warnung: Kein Eintrag gefunden mit ID {row_id}. Füge neuen Eintrag ein.")
                     data["id"] = row_id  # Stelle sicher, dass die ID beibehalten wird
+                    data["created_at"] = now  # Zeitstempel für die Erstellung
+                    data["updated_at"] = now  # Zeitstempel für die Aktualisierung
                     response = supabase.table("fixkosten").insert(data).execute()
                 else:
+                    data["updated_at"] = now  # Zeitstempel für die Aktualisierung
                     response = supabase.table("fixkosten").update(data).eq("id", row_id).execute()
             else:
                 # Sonst neu erstellen
                 data["id"] = str(uuid.uuid4())
+                data["created_at"] = now  # Zeitstempel für die Erstellung
+                data["updated_at"] = now  # Zeitstempel für die Aktualisierung
                 print(f"Debugging - Erstelle neuen Eintrag mit ID: {data['id']}")
                 response = supabase.table("fixkosten").insert(data).execute()
             
@@ -71,15 +100,26 @@ def update_fixkosten_row(row_data):
         print(f"Fehler beim Speichern der Fixkosten: {e}")
         import traceback
         traceback.print_exc()
-        raise    
-    except Exception as e:
-        print(f"Fehler beim Speichern der Fixkosten: {e}")
-        import traceback
-        traceback.print_exc()
-        raise
-def delete_fixkosten_row(row_id):
-    """Löscht einen Fixkosten-Eintrag."""
+        return None
+
+def delete_fixkosten_row(row_id, user_id=None):
+    """
+    Löscht einen Fixkosten-Eintrag.
+    
+    Args:
+        row_id (str): ID des zu löschenden Eintrags
+        user_id (str, optional): Benutzer-ID für Audit-Trails
+        
+    Returns:
+        bool: True bei Erfolg, False bei Fehler
+    """
     try:
+        # Wenn wir einen Audit-Trail benötigen, könnten wir hier
+        # zuerst die Löschaktion protokollieren, bevor wir den Eintrag löschen
+        if user_id:
+            # Hier könnte man einen Audit-Trail-Eintrag erstellen
+            pass
+            
         supabase.table("fixkosten").delete().eq("id", row_id).execute()
         return True
     except Exception:
@@ -112,7 +152,7 @@ def adjust_for_weekend(payment_date):
     # Für alle anderen Wochentage, behalte das Datum bei
     return payment_date
 
-def convert_fixkosten_to_buchungen(start_date, end_date):
+def convert_fixkosten_to_buchungen(start_date, end_date, user_id=None):
     """
     Konvertiert Fixkosten in Buchungen für den Liquiditätsplan.
     Bei Zahlungsterminen am Wochenende wird der vorherige Werktag verwendet.
@@ -120,6 +160,7 @@ def convert_fixkosten_to_buchungen(start_date, end_date):
     Args:
         start_date: Startdatum für die Generierung (datetime oder date)
         end_date: Enddatum für die Generierung (datetime oder date)
+        user_id (str, optional): Benutzer-ID für Audit-Trails
     
     Returns:
         DataFrame mit Buchungen im gleichen Format wie die buchungen-Tabelle
@@ -128,7 +169,7 @@ def convert_fixkosten_to_buchungen(start_date, end_date):
     start_date = pd.Timestamp(start_date)
     end_date = pd.Timestamp(end_date)
     
-    # Fixkosten laden
+    # Fixkosten laden - nicht nach Benutzer filtern
     fixkosten_df = load_fixkosten()
     
     if fixkosten_df.empty:
@@ -200,6 +241,13 @@ def convert_fixkosten_to_buchungen(start_date, end_date):
                         "fixkosten_id": fixkosten["id"],  # Referenz zur ursprünglichen Fixkosten
                         "kategorie": "Fixkosten"
                     }
+                    
+                    # Benutzer-ID für Audit-Trail hinzufügen, wenn vorhanden
+                    if user_id:
+                        buchung["user_id"] = user_id
+                    elif "user_id" in fixkosten and fixkosten["user_id"]:
+                        buchung["user_id"] = fixkosten["user_id"]
+                        
                     buchungen.append(buchung)
             
             # Zum nächsten Datum im Rhythmus wechseln

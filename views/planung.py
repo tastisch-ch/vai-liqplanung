@@ -30,7 +30,7 @@ def show():
     search_text = st.sidebar.text_input("Textsuche in Details", placeholder="Suchbegriff eingeben...")
     
     min_betrag = st.sidebar.number_input("Mindestbetrag (CHF)", value=0.0, step=100.0)
-    max_betrag = st.sidebar.number_input("Maximalbetrag (CHF)", value=10000.0, step=100.0)
+    max_betrag = st.sidebar.number_input("Maximalbetrag (CHF)", value=25000.0, step=1000.0)  # Erhöht für große Beträge
     
     # Sortieroptionen
     sort_options = ["Datum (aufsteigend)", "Datum (absteigend)", "Betrag (aufsteigend)", "Betrag (absteigend)"]
@@ -48,6 +48,7 @@ def show():
     else:
         df = load_buchungen()
 
+    # Überprüfe, ob df None oder leer ist, bevor du fortfährst
     if df is None or df.empty:
         st.info("Noch keine Daten verfügbar.")
         return
@@ -55,7 +56,7 @@ def show():
     df = df.copy()
     df.columns = df.columns.str.lower()
     df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
-    df["date"] = df["date"].apply(parse_date_swiss_fallback)
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df["direction"] = df["direction"].str.lower()
     
     # Direkt nach Datum filtern für alle Buchungen
@@ -82,19 +83,16 @@ def show():
                 pd.Timestamp(end_date)
             )
             
-            if not fixkosten_df.empty:
+            if fixkosten_df is not None and not fixkosten_df.empty:
                 # Spaltennamen vereinheitlichen
                 fixkosten_df.columns = fixkosten_df.columns.str.lower()
                 
                 # Sicherstellen, dass date ein Timestamp ist
                 if "date" in fixkosten_df.columns:
-                    fixkosten_df["date"] = pd.to_datetime(fixkosten_df["date"])
+                    fixkosten_df["date"] = pd.to_datetime(fixkosten_df["date"], errors="coerce")
                 
                 if "kategorie" not in fixkosten_df.columns:
                     fixkosten_df["kategorie"] = "Fixkosten"
-                
-                # KRITISCH: Sicherstellen, dass direction immer outgoing ist für Fixkosten
-                fixkosten_df["direction"] = "outgoing"
                 
                 fixkosten_count = len(fixkosten_df)
                 
@@ -108,28 +106,26 @@ def show():
             st.error(f"❌ Fehler beim Laden der Fixkosten: {e}")
             st.exception(e)  # Debug-Info anzeigen
     
-    # NEU: Simulationen laden, wenn aktiviert
+    # Simulationen laden, wenn aktiviert
     simulation_count = 0
     if show_simulationen:
         try:
             simulation_df = convert_simulationen_to_buchungen()
             
-            if not simulation_df.empty:
+            if simulation_df is not None and not simulation_df.empty:
                 # Datumsfilter auch auf Simulationen anwenden
-                simulation_df["date"] = pd.to_datetime(simulation_df["date"])
+                simulation_df["date"] = pd.to_datetime(simulation_df["date"], errors="coerce")
                 simulation_df = simulation_df[simulation_df["date"].dt.date >= start_date]
                 simulation_df = simulation_df[simulation_df["date"].dt.date <= end_date]
                 
                 # Spaltennamen normalisieren
                 simulation_df.columns = simulation_df.columns.str.lower()
                 
+                # Sicherstellen, dass amount korrekt konvertiert wird
+                simulation_df["amount"] = pd.to_numeric(simulation_df["amount"], errors="coerce")
+                
                 if "kategorie" not in simulation_df.columns:
                     simulation_df["kategorie"] = "Simulation"
-                
-                # Sicherstellen, dass direction für Outgoing-Simulationen korrekt ist
-                if "direction" in simulation_df.columns:
-                    # In Kleinbuchstaben konvertieren
-                    simulation_df["direction"] = simulation_df["direction"].str.lower()
                 
                 simulation_count = len(simulation_df)
                 
@@ -153,19 +149,16 @@ def show():
                 pd.Timestamp(end_date)
             )
             
-            if not lohn_df.empty:
+            if lohn_df is not None and not lohn_df.empty:
                 # Spaltennamen vereinheitlichen
                 lohn_df.columns = lohn_df.columns.str.lower()
                 
                 # Sicherstellen, dass date ein Timestamp ist
                 if "date" in lohn_df.columns:
-                    lohn_df["date"] = pd.to_datetime(lohn_df["date"])
+                    lohn_df["date"] = pd.to_datetime(lohn_df["date"], errors="coerce")
                 
                 if "kategorie" not in lohn_df.columns:
                     lohn_df["kategorie"] = "Lohn"
-                
-                # KRITISCH: Sicherstellen, dass direction immer outgoing ist für Löhne
-                lohn_df["direction"] = "outgoing"
                 
                 # KORREKTUR: Sicherstellen, dass keine "modified" Spalte existiert bei Lohnbuchungen
                 if "modified" in lohn_df.columns:
@@ -183,13 +176,14 @@ def show():
             st.error(f"❌ Fehler beim Laden der Lohndaten: {e}")
             st.exception(e)  # Debug-Info anzeigen
 
-    # Beträge entsprechend der Richtung anpassen
+    # KORRIGIERT: Beträge entsprechend der Richtung anpassen 
+    # Wichtig: Ausgaben müssen als negative Werte für korrekte Kontostandsberechnung dargestellt werden
     df["amount"] = df.apply(
         lambda row: -abs(float(row["amount"])) if row["direction"].lower() == "outgoing" else abs(float(row["amount"])),
         axis=1
     )
     
-    # NEU: Textsuche anwenden
+    # Textsuche anwenden
     if search_text:
         # Sicherstellen, dass details eine Zeichenkette ist
         df["details"] = df["details"].astype(str)
@@ -199,7 +193,7 @@ def show():
     # Betragfilter anwenden
     df = df[(abs(df["amount"]) >= min_betrag) & (abs(df["amount"]) <= max_betrag)]
     
-    # NEU: Sortierung anwenden
+    # Sortierung anwenden
     if sort_by == "Datum (aufsteigend)":
         df = df.sort_values("date", ascending=True)
     elif sort_by == "Datum (absteigend)":
@@ -212,18 +206,15 @@ def show():
     # Kontostand berechnen
     start_balance = st.session_state.get("start_balance", 0)
     
-    # WICHTIG: Zurück zu Datumsreihenfolge für die Kontostandsberechnung
-    df_sorted = df.sort_values("date").reset_index(drop=True)
+    # Zurück zu Datumsreihenfolge für die Kontostandsberechnung
+    df = df.sort_values("date").reset_index(drop=True)
     
-    # KORREKTUR: Kontostand korrekt berechnen
-    df_sorted["kontostand"] = df_sorted["amount"].cumsum() + start_balance
-    
-    # Sortierte Indizes auf ursprüngliche Sortierung anwenden
-    kontostand_mapping = dict(zip(df_sorted.index, df_sorted["kontostand"]))
-    df["kontostand"] = df.index.map(kontostand_mapping)
+    # KORRIGIERT: Kontostandsberechnung - einfach kumulierte Summe der Beträge
+    # Da wir bereits Ausgaben als negative Werte behandeln, funktioniert die cumsum-Funktion korrekt
+    df["kontostand"] = start_balance + df["amount"].cumsum()
 
     # Hinweis für bearbeitete Einträge und Kategorien
-    # KORREKTUR: Standardmäßig leere Hinweise setzen und nur setzen wenn modified=True
+    # Standardmäßig leere Hinweise setzen und nur setzen wenn modified=True
     df["hinweis"] = ""
     if "modified" in df.columns:
         df.loc[df["modified"] == True, "hinweis"] = "✏️"
@@ -260,10 +251,11 @@ def show():
             # Leere Spalte einfügen
             df[col] = ""
     
-    # Für die Anzeige nur die benötigten Spalten verwenden
-    display_df = df[display_columns].copy()
+    # Wende die Sortierung erneut an (falls sie nicht Datum ist)
+    if "aufsteigend" not in sort_by and "absteigend" not in sort_by:
+        df = df.sort_values("date").reset_index(drop=True)
     
-    # Formatierung für die Anzeige
+    display_df = df[display_columns].copy()
     display_df["date"] = display_df["date"].dt.strftime("%d.%m.%Y")
     display_df["amount"] = display_df["amount"].apply(chf_format)
     display_df["kontostand"] = display_df["kontostand"].apply(chf_format)
@@ -282,23 +274,23 @@ def show():
     # Detaillierte Übersicht mit optimiertem Styling
     st.subheader("📝 Detaillierte Übersicht")
     
-    # Wichtig: Kategoriebasierte Färbung für Einnahmen/Ausgaben - VERBESSERT
+    # VEREINHEITLICHT: Farben basierend nur auf Einnahme/Ausgabe, unabhängig von der Kategorie
     def style_row(row):
         # Erstelle eine Liste mit Standard-Styling (kein Hintergrund)
         styles = [""] * len(row)
         
         # Hole den Index von row, um auf das Original-DataFrame zuzugreifen
         if row.name < len(df):
-            # Direction anhand des Vorzeichens bestimmen
-            betrag_str = row["Betrag"] if "Betrag" in row else ""
+            # Wir nutzen amount für die Farbentscheidung (positiv = Einnahme, negativ = Ausgabe)
+            amount_value = df.iloc[row.name]["amount"]
             
-            # Bestimme Farbe basierend auf Vorzeichen
-            if betrag_str.startswith("-") or "CHF -" in betrag_str:
-                # Rot für Ausgaben (inkl. Fixkosten und Simulationen)
-                styles = ["background-color: #ffd6d6"] * len(row)
-            else:
+            # Einheitliche Farben: Grün für Einnahmen, Rot für Ausgaben, unabhängig von der Kategorie
+            if amount_value > 0:
                 # Grün für Einnahmen
                 styles = ["background-color: #d1ffd6"] * len(row)
+            else:
+                # Rot für Ausgaben
+                styles = ["background-color: #ffd6d6"] * len(row)
                 
         return styles
     
@@ -306,20 +298,20 @@ def show():
     filter_count = len(display_df)
     total_count = original_count + fixkosten_count + simulation_count + lohn_count
     
-    if search_text or min_betrag > 0 or max_betrag < 10000:
+    if search_text or min_betrag > 0 or max_betrag < 25000:
         st.caption(f"Gefilterte Anzeige: {filter_count} von {total_count} Buchungen " +
                   f"(Zeitraum: {start_date.strftime('%d.%m.%Y')} bis {end_date.strftime('%d.%m.%Y')})")
     else:
         st.caption(f"Angezeigt werden {filter_count} Buchungen im Zeitraum {start_date.strftime('%d.%m.%Y')} bis {end_date.strftime('%d.%m.%Y')}")
     
     # Legende für die Icons
-    legend_cols = st.columns(4)  # Auf 4 Spalten erweitert für den neuen Lohn-Icon
+    legend_cols = st.columns(4)
     with legend_cols[0]:
         st.caption("📌 = Fixkosten")
     with legend_cols[1]:
         st.caption("🔮 = Simulation")
     with legend_cols[2]:
-        st.caption("💰 = Lohn")  # NEU: Lohn-Icon-Legende
+        st.caption("💰 = Lohn")
     with legend_cols[3]:
         st.caption("✏️ = Bearbeitet")
     

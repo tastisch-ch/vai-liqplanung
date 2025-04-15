@@ -4,11 +4,20 @@ from datetime import datetime, date, timedelta
 from core.parsing import parse_date_swiss_fallback
 from logic.storage_buchungen import load_buchungen, update_buchung_by_id
 from core.utils import chf_format
+from core.auth import prüfe_session_gültigkeit, log_user_activity
 
 def show():
+    # Authentifizierungsprüfung
+    if not prüfe_session_gültigkeit():
+        st.warning("Bitte melden Sie sich an, um auf diesen Bereich zuzugreifen")
+        st.stop()
+    
+    # Benutzer-ID für Audit-Protokollierung
+    user_id = st.session_state.user.id
+    
     st.header("✏️ Finanzplanung (editierbar)")
 
-    # Lade alle Buchungen
+    # Lade alle Buchungen - keine Benutzerfilterung
     df_all = load_buchungen()
 
     if df_all is None or df_all.empty:
@@ -50,6 +59,13 @@ def show():
     # Anzahl der angezeigten Einträge
     st.caption(f"Es werden {len(df_filtered)} von {len(df_all)} Buchungen angezeigt.")
     
+    # Aktivität protokollieren
+    log_user_activity("Editor geöffnet", {
+        "zeitraum": f"{start_date} bis {end_date}",
+        "anzahl_buchungen": len(df_filtered),
+        "nur_bearbeitete": zeige_bearbeitet
+    })
+    
     # Editable DataFrame vorbereiten
     editable_df = df_filtered[["id", "date", "details", "amount", "direction", "modified"]].copy()
     
@@ -89,28 +105,30 @@ def show():
         column_config={
             "Art": st.column_config.SelectboxColumn(
                 "Art",
+                help="Art der Buchung",
                 options=["Incoming", "Outgoing"],
-                help="Typ der Buchung"
+                required=True
             ),
-            "Betrag": st.column_config.NumberColumn(
-                "Betrag",
-                format="%.2f CHF", 
-                help="Betrag in CHF"
-            ),
-            # Verwende DateColumn mit korrekten dtype
             "Datum": st.column_config.DateColumn(
                 "Datum",
                 help="Datum der Buchung",
+                min_value=date(2000, 1, 1),
+                max_value=date(2050, 12, 31),
                 format="DD.MM.YYYY",
-                min_value=date(2020, 1, 1),
-                max_value=date(2030, 12, 31),
-                step=1
+                required=True
+            ),
+            "Betrag": st.column_config.NumberColumn(
+                "Betrag",
+                help="Betrag in CHF",
+                min_value=0.0,
+                format="%.2f CHF",
+                required=True
             )
         }
     )
 
     # Verarbeitung der Änderungen
-    if edited_df is not None:
+    if edited_df is not None and not df_filtered.empty:
         try:
             # Spalten zurückwandeln
             edited_df.columns = ["date", "details", "amount", "direction"]
@@ -141,51 +159,77 @@ def show():
                 is_modified = (
                     original_date != edited["date"]
                     or original["details"] != edited["details"]
+                    or original["amount"] != edited["amount"]
                     or original["direction"] != edited["direction"]
-                    or abs(original["amount"] - edited["amount"]) > 0.01
                 )
 
                 if is_modified:
                     try:
-                        # Konvertiere date zu string im Format YYYY-MM-DD
-                        date_str = edited["date"].strftime("%Y-%m-%d")
+                        # Originaldaten für Audit-Log speichern
+                        original_data = {
+                            "date": original_date.isoformat() if hasattr(original_date, "isoformat") else str(original_date),
+                            "details": original["details"],
+                            "amount": float(original["amount"]),
+                            "direction": original["direction"]
+                        }
                         
+                        # Aktualisierte Daten
+                        new_data = {
+                            "date": edited["date"].isoformat() if hasattr(edited["date"], "isoformat") else str(edited["date"]),
+                            "details": edited["details"],
+                            "amount": float(edited["amount"]),
+                            "direction": edited["direction"]
+                        }
+                        
+                        # Aktualisierungszeitstempel hinzufügen
+                        now = datetime.now().isoformat()
+                        
+                        # Datensatz aktualisieren mit Benutzer-ID für Audit
                         update_buchung_by_id(
                             id=original["id"],
-                            date=date_str,
+                            date=edited["date"],
                             details=edited["details"],
-                            amount=round(edited["amount"], 2),
-                            direction=edited["direction"]
+                            amount=edited["amount"],
+                            direction=edited["direction"],
+                            user_id=user_id,  # Benutzer-ID für Audit-Trail
+                            updated_at=now  # Aktualisierungszeitstempel
                         )
+                        
+                        # Aktivität protokollieren
+                        log_user_activity("Buchung bearbeitet", {
+                            "id": original["id"],
+                            "original": original_data,
+                            "neu": new_data
+                        })
+                        
                         modified_ids.append(original["id"])
                         modified_rows.append(idx)
-                    except Exception as update_error:
-                        st.error(f"Fehler beim Aktualisieren von Eintrag {idx+1}: {update_error}")
+                    except Exception as e:
+                        st.error(f"❌ Fehler beim Aktualisieren von Eintrag {idx+1}: {e}")
             
-            # Neue Zeilen hinzufügen
+            # Neue Einträge hinzufügen - noch nicht implementiert
             if has_new_rows:
                 for idx in range(len(editable_df), len(edited_df)):
                     edited = edited_df.iloc[idx]
-                    # Neue Buchung zur Datenbank hinzufügen
-                    # Hier muss noch die Implementierung für das Hinzufügen erfolgen
-                    # Da dies in den aktuellen Dateien nicht vorhanden ist
-                    st.info(f"Neue Zeile erkannt in Zeile {idx+1}. Hinzufügen von neuen Einträgen wird in einer zukünftigen Version implementiert.")
+                    # Hier würde die Logik zum Hinzufügen neuer Datensätze implementiert
 
             if modified_ids:
-                st.success(f"✔️ {len(modified_ids)} Änderung(en) gespeichert.")
+                st.success(f"✅ {len(modified_ids)} Änderungen gespeichert.")
                 
-                # Zeige geänderte Zeilen an
-                with st.expander("Geänderte Zeilen anzeigen", expanded=False):
+                # Geänderte Zeilen anzeigen
+                with st.expander("Geänderte Zeilen anzeigen"):
                     for idx in modified_rows:
-                        st.write(f"Zeile {idx+1}: {edited_df.iloc[idx]['details']}")
+                        st.write(f"Zeile {idx+1}: {df_filtered.iloc[idx]['details']}")
+                
+                # Session-State aktualisieren
+                st.session_state.edited_df = load_buchungen()
+                st.rerun()
+            elif has_new_rows:
+                st.info("Neue Einträge werden derzeit nicht unterstützt.")
             else:
-                if not has_new_rows:
-                    st.info("Keine Änderungen erkannt.")
-
-            # Session aktualisieren
-            updated_df = load_buchungen()
-            st.session_state.edited_df = updated_df.copy()
+                st.info("Keine Änderungen erkannt.")
 
         except Exception as e:
             st.error(f"❌ Fehler beim Verarbeiten: {e}")
-            st.exception(e)  # Zeige vollständigen Fehler für Debugging
+            # Fehler protokollieren
+            log_user_activity("Fehler beim Bearbeiten", {"fehler": str(e)})

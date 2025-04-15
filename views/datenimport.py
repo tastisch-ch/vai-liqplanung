@@ -7,8 +7,17 @@ import uuid
 from core.parsing import parse_date_swiss_fallback, parse_html_output
 from core.utils import chf_format
 from logic.storage_buchungen import save_buchungen, load_buchungen
+from core.auth import prüfe_session_gültigkeit, log_user_activity
 
 def show():
+    # Authentifizierungsprüfung
+    if not prüfe_session_gültigkeit():
+        st.warning("Bitte melden Sie sich an, um auf diesen Bereich zuzugreifen")
+        st.stop()
+    
+    # Benutzer-ID für Audit-Protokollierung 
+    user_id = st.session_state.user.id
+    
     st.header("📂 Datenimport")
 
     # Info-Box über die Trennung von Kontostand und Import
@@ -94,7 +103,10 @@ def show():
                     if new_entries:
                         df_combined = pd.concat(new_entries, ignore_index=True)
                         
-                        # ✅ Alle Buchungen laden
+                        # Benutzer-ID für Audit-Protokollierung hinzufügen
+                        df_combined["user_id"] = user_id
+                        
+                        # ✅ Alle Buchungen laden - keine Benutzerfilterung
                         all_df = load_buchungen()
                         
                         if all_df is not None and not all_df.empty:
@@ -135,12 +147,26 @@ def show():
                         else:
                             df_new["id"] = [str(uuid.uuid4()) for _ in range(len(df_new))]
                             df_new["modified"] = False
-                            save_buchungen(df_new)
+                            
+                            # Datum für created_at und updated_at hinzufügen
+                            now = datetime.now().isoformat()
+                            df_new["created_at"] = now
+                            df_new["updated_at"] = now
+                            
+                            # Buchungen speichern (mit Benutzer-ID für Audit)
+                            save_buchungen(df_new, user_id=user_id)
+                            
+                            # Aktivität protokollieren
+                            html_neue = len(df_new[df_new["Direction"] == "Outgoing"])
+                            excel_neue = len(df_new[df_new["Direction"] == "Incoming"])
+                            log_user_activity("Daten importiert", {
+                                "ausgaben": html_neue,
+                                "einnahmen": excel_neue,
+                                "gesamt": len(df_new)
+                            })
                             
                             # Erfolgs-Nachricht
                             if html_input and uploaded_excel:
-                                html_neue = len(df_new[df_new["Direction"] == "Outgoing"])
-                                excel_neue = len(df_new[df_new["Direction"] == "Incoming"])
                                 st.success(f"✅ {html_neue} neue Ausgaben und {excel_neue} neue Einnahmen importiert.")
                             elif html_input:
                                 st.success(f"✅ {len(df_new)} neue Ausgaben importiert.")
@@ -151,21 +177,24 @@ def show():
                             
                             # Wechsel-Button zur Planung
                             if st.button("Zur Planung wechseln"):
-                                st.session_state.active_tab = "Planung"
-                                st.experimental_rerun()
+                                st.session_state.go_to_planung = True
+                                st.rerun()
                     else:
                         st.info("Es wurden keine neuen Daten zum Importieren gefunden.")
                         
                 except Exception as e:
-                    st.error(f"❌ Fehler beim Import: {str(e)}")
+                    st.error(f"❌ Fehler beim Import: {e}")
                     st.exception(e)
+                    
+                    # Fehlgeschlagenen Import protokollieren
+                    log_user_activity("Import fehlgeschlagen", {"fehler": str(e)})
         else:
             st.error("❌ Bitte füge HTML-Tabelle ein oder lade eine Excel-Datei hoch.")
 
     # Abschnitt für bestehende Daten
     st.markdown("---")
     
-    # Aktuelle Daten anzeigen
+    # Aktuelle Daten anzeigen - keine Benutzerfilterung
     existing_data = load_buchungen()
     if existing_data is not None and not existing_data.empty:
         st.subheader("Vorhandene Daten")
@@ -194,5 +223,8 @@ def show():
                     use_container_width=True
                 )
                 st.caption(f"Es werden {len(display_df)} von {len(existing_data)} Buchungen angezeigt.")
+                
+                # Aktivität protokollieren
+                log_user_activity("Vorhandene Daten angesehen", {"filter": view_options, "anzahl": len(display_df)})
             else:
                 st.info("Keine Daten in dieser Kategorie gefunden.")

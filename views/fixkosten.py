@@ -5,8 +5,17 @@ from datetime import datetime, date
 from core.parsing import parse_date_swiss_fallback
 from logic.storage_fixkosten import load_fixkosten, update_fixkosten_row, delete_fixkosten_row
 from core.utils import chf_format
+from core.auth import prüfe_session_gültigkeit, log_user_activity
 
 def show():
+    # Authentifizierungsprüfung
+    if not prüfe_session_gültigkeit():
+        st.warning("Bitte melden Sie sich an, um auf diesen Bereich zuzugreifen")
+        st.stop()
+    
+    # Benutzer-ID für Audit-Protokollierung
+    user_id = st.session_state.user.id
+    
     st.header("📃 Fixkosten verwalten")
 
     # Session-State für die Filtereinstellungen und Aktualisierungen
@@ -75,7 +84,8 @@ def show():
                     "betrag": float(betrag),
                     "rhythmus": rhythmus,
                     "start": datum,
-                    "enddatum": enddatum if enddatum != datum else None
+                    "enddatum": enddatum if enddatum != datum else None,
+                    "user_id": user_id  # Benutzer-ID für Audit-Trail
                 }
                 update_fixkosten_row(new_entry)
                 
@@ -88,6 +98,7 @@ def show():
     st.markdown("---")
 
     # 📄 Bestehende Einträge anzeigen und filtern
+    # Lade alle Fixkosten ohne Benutzerfilterung
     df = load_fixkosten()
     if df.empty:
         st.info("Noch keine Fixkosten erfasst.")
@@ -211,7 +222,8 @@ def show():
                             "betrag": float(betrag),
                             "rhythmus": rhythmus,
                             "start": start,
-                            "enddatum": end_date
+                            "enddatum": end_date,
+                            "user_id": user_id  # Benutzer-ID beibehalten
                         }
                         
                         update_fixkosten_row(changed_row)
