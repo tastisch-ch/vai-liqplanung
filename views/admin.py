@@ -150,7 +150,7 @@ def benutzer_management():
                     name = st.text_input("Name", value=selected_user.get('name', ''))
                     email = st.text_input("E-Mail", value=selected_user.get('email', ''), disabled=True)
                     
-                    role_options = ["user", "admin"]
+                    role_options = ["user", "admin", "read_only"]
                     role = st.selectbox(
                         "Rolle",
                         role_options,
@@ -178,7 +178,7 @@ def benutzer_management():
             new_name = st.text_input("Name")
             new_email = st.text_input("E-Mail")
             new_password = st.text_input("Passwort", type="password")
-            new_role = st.selectbox("Rolle", ["user", "admin"])
+            new_role = st.selectbox("Rolle", ["user", "admin", "read_only"])
             
             submit_button = st.form_submit_button("Benutzer erstellen", use_container_width=True)
             

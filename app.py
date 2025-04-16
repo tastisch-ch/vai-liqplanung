@@ -105,6 +105,10 @@ with st.sidebar:
         st.sidebar.success(f"Angemeldet als: {st.session_state.user.email}")
         if st.session_state.is_admin:
             st.sidebar.info("Administrator")
+        # Read-Only Status anzeigen
+        from core.auth import is_read_only
+        if is_read_only():
+            st.sidebar.warning("Lesezugriff (Read-Only)")
 
 # ----------------------------------
 # Kontostand-Initialisierung
@@ -144,6 +148,10 @@ else:
     # Navigationselemente für nicht angemeldete Benutzer
     nav_options = ["Login"]
     nav_icons = ["key"]
+
+# WICHTIG: Konvertiere Listen zu Listen (nicht zu Sets), um JSON-Serialisierungsprobleme zu vermeiden
+nav_options = list(nav_options)
+nav_icons = list(nav_icons)
 
 # Navigationselement definieren
 selected = option_menu(
@@ -197,12 +205,17 @@ if st.session_state.is_authenticated:
         if "kontostand_error" not in st.session_state:
             st.session_state.kontostand_error = False
         
+        # Prüfen, ob Benutzer im Read-Only Modus ist
+        from core.auth import is_read_only
+        readonly_mode = is_read_only()
+        
         # Kontostand direkt als Textfeld
         text_input = st.text_input(
             "Kontostand (CHF):",
             value=st.session_state.kontostand_direkt,
             key="kontostand_direkt",
-            on_change=update_kontostand
+            on_change=update_kontostand,
+            disabled=readonly_mode  # Deaktivieren, wenn Read-Only
         )
         
         # Erfolgsmeldung nach Änderung

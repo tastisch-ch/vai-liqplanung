@@ -14,6 +14,9 @@ def initialisiere_auth_state():
         st.session_state.user = None
     if "is_authenticated" not in st.session_state:
         st.session_state.is_authenticated = False
+        # Versuche, eine gespeicherte Session wiederherzustellen
+        if not st.session_state.is_authenticated:
+            wiederherstellen_session()
     if "is_admin" not in st.session_state:
         st.session_state.is_admin = False
     if "auth_message" not in st.session_state:
@@ -31,6 +34,7 @@ def initialisiere_auth_state():
             "background_color": "#FFFFFF"
         }
 
+
 def anmelden(email, password, stay_logged_in=False):
     """
     Benutzeranmeldung über Supabase
@@ -45,6 +49,12 @@ def anmelden(email, password, stay_logged_in=False):
             st.session_state.is_authenticated = True
             st.session_state.stay_logged_in = stay_logged_in
             st.session_state.last_activity = datetime.now()
+            
+            # Wichtig: Token für persistente Anmeldung speichern
+            if stay_logged_in:
+                # Speichere die Session Token im Session State
+                st.session_state.session_token = response.session.access_token
+                st.session_state.refresh_token = response.session.refresh_token
             
             # Benutzerrolle überprüfen
             user_data = supabase.table('profiles').select('*').eq('id', response.user.id).execute()
@@ -68,6 +78,66 @@ def anmelden(email, password, stay_logged_in=False):
         
     return False
 
+def magic_link_anmelden(email):
+    """
+    Sendet einen Magic Link zur E-Mail-Adresse
+    """
+    try:
+        # Supabase Magic Link senden
+        response = supabase.auth.sign_in_with_otp({"email": email})
+        
+        if response:
+            st.session_state.auth_message = f"Magic Link wurde an {email} gesendet. Bitte prüfe deine E-Mails."
+            st.session_state.auth_message_type = "info"
+            return True
+    except Exception as e:
+        st.session_state.auth_message = f"Fehler beim Senden des Magic Links: {str(e)}"
+        st.session_state.auth_message_type = "error"
+    
+    return False
+
+def wiederherstellen_session():
+    """
+    Versucht, eine gespeicherte Session wiederherzustellen
+    """
+    if "session_token" in st.session_state and "refresh_token" in st.session_state:
+        try:
+            # Versuche, die bestehende Session zu validieren
+            session = {"access_token": st.session_state.session_token, "refresh_token": st.session_state.refresh_token}
+            response = supabase.auth.set_session(session)
+            
+            if response and response.user:
+                st.session_state.user = response.user
+                st.session_state.is_authenticated = True
+                st.session_state.stay_logged_in = True
+                st.session_state.last_activity = datetime.now()
+                
+                # Aktualisierte Token speichern
+                st.session_state.session_token = response.session.access_token
+                st.session_state.refresh_token = response.session.refresh_token
+                
+                # Benutzerrolle überprüfen
+                user_data = supabase.table('profiles').select('*').eq('id', response.user.id).execute()
+                
+                if user_data.data and user_data.data[0].get('role') == 'admin':
+                    st.session_state.is_admin = True
+                else:
+                    st.session_state.is_admin = False
+                
+                # Benutzereinstellungen laden
+                lade_benutzereinstellungen(response.user.id)
+                
+                return True
+        except Exception as e:
+            # Bei Fehler: Session löschen
+            if "session_token" in st.session_state:
+                del st.session_state.session_token
+            if "refresh_token" in st.session_state:
+                del st.session_state.refresh_token
+            print(f"Fehler beim Wiederherstellen der Session: {e}")
+    
+    return False
+
 def abmelden():
     """
     Benutzerabmeldung
@@ -78,6 +148,13 @@ def abmelden():
         st.session_state.is_authenticated = False
         st.session_state.is_admin = False
         st.session_state.stay_logged_in = False
+        
+        # Session-Token löschen
+        if "session_token" in st.session_state:
+            del st.session_state.session_token
+        if "refresh_token" in st.session_state:
+            del st.session_state.refresh_token
+            
         st.session_state.auth_message = "Erfolgreich abgemeldet."
         st.session_state.auth_message_type = "info"
         
@@ -114,7 +191,7 @@ def registrieren(email, password, name, role='user'):
             profile_data = {
                 "id": response.user.id,
                 "name": name,
-                "role": role,
+                "role": role,  # Kann jetzt auch 'read_only' sein
                 "created_at": datetime.now().isoformat()
             }
             
@@ -130,6 +207,24 @@ def registrieren(email, password, name, role='user'):
         
     return False
 
+def is_read_only():
+    """
+    Überprüft, ob der aktuelle Benutzer nur Leserechte hat.
+    
+    Returns:
+        bool: True, wenn der Benutzer read_only ist, sonst False
+    """
+    if not st.session_state.is_authenticated or not st.session_state.user:
+        return False
+    
+    try:
+        user_data = supabase.table('profiles').select('*').eq('id', st.session_state.user.id).execute()
+        
+        return user_data.data and user_data.data[0].get('role') == 'read_only'
+    except Exception as e:
+        print(f"Fehler bei der Überprüfung der Read-Only-Rechte: {e}")
+        return False
+    
 def benutzer_auflisten():
     """
     Liste aller Benutzer aus der profiles-Tabelle abrufen (nur für Admins)
@@ -260,6 +355,9 @@ def prüfe_session_gültigkeit():
     Überprüft, ob die aktuelle Session noch gültig ist
     """
     if not st.session_state.is_authenticated:
+        # Wenn nicht authentifiziert, versuche eine gespeicherte Session wiederherzustellen
+        if wiederherstellen_session():
+            return True
         return False
         
     # Wenn "Eingeloggt bleiben" nicht aktiviert ist, prüfe auf Inaktivität

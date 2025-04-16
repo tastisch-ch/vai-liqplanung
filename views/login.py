@@ -1,5 +1,5 @@
 import streamlit as st
-from core.auth import anmelden, abmelden, initialisiere_auth_state, prüfe_session_gültigkeit, passwort_zuruecksetzen
+from core.auth import anmelden, abmelden, initialisiere_auth_state, prüfe_session_gültigkeit, passwort_zuruecksetzen, magic_link_anmelden
 
 def show():
     """
@@ -36,7 +36,14 @@ def show():
     if st.session_state.is_authenticated and st.session_state.user:
         logged_in_ui()
     else:
-        login_form()
+        # Tabs für verschiedene Login-Methoden
+        tab1, tab2 = st.tabs(["Login mit Passwort", "Login mit Magic Link"])
+        
+        with tab1:
+            login_form()
+        
+        with tab2:
+            magic_link_form()
         
         # Passwort vergessen Link
         st.markdown("---")
@@ -82,6 +89,34 @@ def login_form():
                     anmelden(email, password, stay_logged_in)
                     # Seite neu laden, um die Änderungen zu übernehmen
                     st.rerun()
+
+def magic_link_form():
+    """
+    Magic Link Login-Formular darstellen
+    """
+    st.markdown("""
+    ### Login mit Magic Link
+    Erhalte einen einmaligen Login-Link per E-Mail. Kein Passwort notwendig!
+    """)
+    
+    with st.form(key="magic_link_form"):
+        email = st.text_input(
+            "E-Mail-Adresse",
+            placeholder="name@beispiel.ch",
+            help="Geben Sie Ihre registrierte E-Mail-Adresse ein"
+        )
+        
+        submit_button = st.form_submit_button(
+            label="Magic Link senden",
+            use_container_width=True
+        )
+        
+        if submit_button:
+            if not email:
+                st.error("Bitte geben Sie Ihre E-Mail-Adresse ein")
+            else:
+                with st.spinner("Magic Link wird gesendet..."):
+                    magic_link_anmelden(email)
 
 def logged_in_ui():
     """

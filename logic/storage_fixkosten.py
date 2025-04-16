@@ -52,13 +52,9 @@ def update_fixkosten_row(row_data, user_id=None):
         # Zeitstempel für Erstellung/Aktualisierung
         now = datetime.utcnow().isoformat()
         
-        print(f"Debugging - Rohdaten: {row_data}")
-        print(f"Debugging - Vorbereitete Daten: {data}")
-        
         try:
             # Wenn bereits ein Eintrag existiert, aktualisieren
             if row_id:
-                print(f"Debugging - Aktualisiere Eintrag mit ID: {row_id}")
                 
                 # Überprüfe, ob der Eintrag existiert, bevor die Aktualisierung erfolgt
                 existing_entry = supabase.table("fixkosten").select("*").eq("id", row_id).execute()
@@ -80,17 +76,6 @@ def update_fixkosten_row(row_data, user_id=None):
                 print(f"Debugging - Erstelle neuen Eintrag mit ID: {data['id']}")
                 response = supabase.table("fixkosten").insert(data).execute()
             
-            # Erweiterte Fehlersuche
-            print(f"Debugging - Supabase Antwort:")
-            print(f"  - Vollständige Antwort: {response}")
-            print(f"  - Daten: {response.data}")
-            
-            # Überprüfen Sie explizit die Antwort
-            if not response.data:
-                print("Warnung: Keine Daten in der Antwort")
-                raise Exception("Speichern nicht erfolgreich: Keine Daten in der Antwort")
-            
-            return response.data
         
         except Exception as supabase_error:
             print(f"Supabase-Fehler: {supabase_error}")
