@@ -15,7 +15,9 @@ def get_cookie_manager():
     # Erstelle einen neuen Cookie-Manager (sollte eigentlich nicht aufgerufen werden)
     # da der Cookie-Manager in app.py initialisiert wird
     try:
-        return stx.CookieManager(key="auth_cookies")
+        cookie_manager = stx.CookieManager(key="auth_cookies_instance")
+        st.session_state["cookie_manager"] = cookie_manager
+        return cookie_manager
     except Exception as e:
         print(f"Fehler beim Erstellen des Cookie-Managers: {e}")
         return None
@@ -94,8 +96,11 @@ def load_auth_from_cookie():
             # Benutzerrolle überprüfen
             user_data = supabase.table('profiles').select('*').eq('id', response.user.id).execute()
             
+            print(f"Cookie-Auth: Benutzerrolle überprüft: {user_data.data}")  # Debugging
+            
             if user_data.data and user_data.data[0].get('role') == 'admin':
                 st.session_state.is_admin = True
+                print("Cookie-Auth: Admin-Status gesetzt")  # Debugging
             else:
                 st.session_state.is_admin = False
             

@@ -67,19 +67,20 @@ def anmelden(email, password, stay_logged_in=False):
             st.session_state.stay_logged_in = stay_logged_in
             st.session_state.last_activity = datetime.now()
             
-            # Speichere Authentifizierungsdaten in ein Cookie, wenn "angemeldet bleiben" aktiviert ist
-            if stay_logged_in:
-                try:
-                    from core.auth_cookie import save_auth_to_cookie
-                    save_auth_to_cookie(response.user, response.session, stay_logged_in)
-                except Exception as e:
-                    print(f"Fehler beim Speichern des Cookies: {e}")
-            
             # Benutzerrolle überprüfen
-            user_data = supabase.table('profiles').select('*').eq('id', response.user.id).execute()
+            user_id = str(response.user.id)
+            user_data = supabase.table('profiles').select('*').eq('id', user_id).execute()
+
+            if not user_data.data:
+                print(f"Kein Profil gefunden für ID: {user_id}")
+            else:
+                print(f"Profil gefunden: {user_data.data[0]}")
+            
+            print(f"Benutzerrolle überprüft: {user_data.data}")  # Debugging
             
             if user_data.data and user_data.data[0].get('role') == 'admin':
                 st.session_state.is_admin = True
+                print("Admin-Status gesetzt")  # Debugging
             else:
                 st.session_state.is_admin = False
                 
@@ -114,16 +115,13 @@ def abmelden():
             clear_auth_cookie()
         except Exception as e:
             print(f"Fehler beim Löschen des Cookies: {e}")
+        
+        # Zusätzlich den gesamten Session-State bereinigen
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
             
         st.session_state.auth_message = "Erfolgreich abgemeldet."
         st.session_state.auth_message_type = "info"
-        
-        # Standardeinstellungen wiederherstellen
-        st.session_state.design_settings = {
-            "primary_color": "#4A90E2",
-            "secondary_color": "#111",
-            "background_color": "#FFFFFF"
-        }
         
     except Exception as e:
         st.session_state.auth_message = f"Abmeldung fehlgeschlagen: {str(e)}"
@@ -173,9 +171,17 @@ def is_read_only():
         return False
     
     try:
-        user_data = supabase.table('profiles').select('*').eq('id', st.session_state.user.id).execute()
+        # Direkter SQL-Zugriff statt über die API
+        user_id = st.session_state.user.id
+        user_data = supabase.rpc(
+            'get_user_role', 
+            {'user_id_param': user_id}
+        ).execute()
         
-        return user_data.data and user_data.data[0].get('role') == 'read_only'
+        if not user_data.data:
+            return False
+            
+        return user_data.data[0] == 'read_only'
     except Exception as e:
         print(f"Fehler bei der Überprüfung der Read-Only-Rechte: {e}")
         return False
@@ -184,39 +190,68 @@ def registrieren(email, password, name, role='user'):
     """
     Neuen Benutzer registrieren (nur für Admins)
     """
+    import traceback
+
     if not st.session_state.is_admin:
         st.session_state.auth_message = "Nur Administratoren können neue Benutzer anlegen."
         st.session_state.auth_message_type = "error"
         return False
-    
+
     try:
-        # Neuen Benutzer erstellen
+        st.write("📤 Registrierungsversuch startet...")
+        print("🧪 Verwende Key mit Rolle:", supabase.auth.session().access_token)  # Debug
+
+        # 1. Benutzer in Supabase Auth anlegen
         response = supabase.auth.admin.create_user({
             "email": email,
             "password": password,
-            "email_confirm": True,
-        })
-        
-        if response.user:
-            # Benutzerprofil erstellen
-            profile_data = {
-                "id": response.user.id,
+            "email_confirm": False,
+            "user_metadata": {
                 "name": name,
-                "role": role,
-                "created_at": datetime.now().isoformat()
+                "display_name": name
             }
-            
-            supabase.table('profiles').insert(profile_data).execute()
-            
-            st.session_state.auth_message = f"Benutzer {email} erfolgreich erstellt."
-            st.session_state.auth_message_type = "success"
-            return True
-            
+        })
+
+        st.write("✅ Create User Response:", response)
+
+        if not response.user:
+            st.error("❌ Kein Benutzerobjekt im Response – Benutzer wurde nicht korrekt angelegt.")
+            return False
+
+        user_id = response.user.id
+
+        # 2. Versuch: Profil-Datensatz updaten, falls er schon existiert (z. B. durch Trigger)
+        profile_data = {
+            "name": name,
+            "role": role,
+            "updated_at": datetime.now().isoformat()
+        }
+
+        update_response = supabase.table("profiles").update(profile_data).eq("id", user_id).execute()
+        st.write("📥 Update Profile Response:", update_response)
+
+        # 3. Optional: prüfen, ob gar kein Eintrag existierte → dann insert versuchen
+        if not update_response.data:
+            st.warning("⚠️ Kein bestehendes Profil gefunden – Insert wird versucht.")
+
+            profile_data["id"] = user_id
+            profile_data["created_at"] = datetime.now().isoformat()
+            insert_response = supabase.table("profiles").insert(profile_data).execute()
+            st.write("📥 Insert Profile Response:", insert_response)
+
+        # Erfolgreich
+        st.session_state.auth_message = f"✅ Benutzer {email} erfolgreich erstellt."
+        st.session_state.auth_message_type = "success"
+        return True
+
     except Exception as e:
-        st.session_state.auth_message = f"Benutzerregistrierung fehlgeschlagen: {str(e)}"
+        st.session_state.auth_message = f"❌ Benutzerregistrierung fehlgeschlagen: {str(e)}"
         st.session_state.auth_message_type = "error"
-        
+        st.error("🔍 Fehlerdetails:")
+        st.exception(traceback.format_exc())
+
     return False
+
 
 def benutzer_auflisten():
     """

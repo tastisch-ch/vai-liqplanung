@@ -1,13 +1,4 @@
 import streamlit as st
-from streamlit_option_menu import option_menu
-import base64
-from core.utils import load_svg_logo
-from core.utils import chf_format
-from views import datenimport, planung, editor, analyse, simulation, fixkosten, mitarbeiter, reset, login, admin
-from datetime import date, timedelta
-from core.auth import initialisiere_auth_state, prüfe_session_gültigkeit, log_user_activity
-from core.auth_cookie import get_cookie_manager
-cookie_manager = get_cookie_manager()
 
 # ----------------------------------
 # 📱 App-Einstellungen
@@ -18,8 +9,34 @@ st.set_page_config(
     page_title="vaios Liq-Planung"
 )
 
+# Erst nach set_page_config andere Importe
+from streamlit_option_menu import option_menu
+import base64
+from core.utils import load_svg_logo
+from core.utils import chf_format
+from views import datenimport, planung, editor, analyse, simulation, fixkosten, mitarbeiter, reset, login, admin
+from datetime import date, timedelta
+from core.auth import initialisiere_auth_state, prüfe_session_gültigkeit, log_user_activity
+from core.auth_cookie import get_cookie_manager
+cookie_manager = get_cookie_manager()
+import extra_streamlit_components as stx
+
+
 # Authentifizierungsstatus initialisieren
 initialisiere_auth_state()
+
+
+# Cookie-Manager initialisieren, falls noch nicht vorhanden
+if "cookie_manager" not in st.session_state or st.session_state["cookie_manager"] is None:
+    import extra_streamlit_components as stx
+    try:
+        cookie_manager = stx.CookieManager(key="auth_cookies_instance")
+        st.session_state["cookie_manager"] = cookie_manager
+    except Exception as e:
+        print(f"Fehler beim Initialisieren des Cookie-Managers: {e}")
+        st.session_state["cookie_manager"] = None
+else:
+    cookie_manager = st.session_state["cookie_manager"]
 
 # Dynamische CSS-Anpassungen basierend auf Benutzereinstellungen
 def apply_custom_styles():
@@ -137,11 +154,13 @@ if st.session_state.is_authenticated:
     # Navigationselemente für angemeldete Benutzer
     nav_options = ["Start", "Datenimport", "Planung", "Editor", "Analyse", "Simulation", "Fixkosten", "Mitarbeiter"]
     nav_icons = ["house", "cloud-upload", "journal-check", "pencil-square", "bar-chart-line", "lightning", "wallet2", "people"]
-    
+
     # Admin-Element hinzufügen, wenn der Benutzer Admin-Rechte hat
     if st.session_state.is_admin:
         nav_options.append("Admin")
         nav_icons.append("gear")
+        nav_options.append("Reset")
+        nav_icons.append("clock")
     
     # Abmelden-Element am Ende hinzufügen
     nav_options.append("Abmelden")

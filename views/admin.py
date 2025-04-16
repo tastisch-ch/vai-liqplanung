@@ -11,7 +11,8 @@ from core.auth import (
     benutzer_loeschen, 
     registrieren,
     speichere_benutzereinstellungen,
-    log_user_activity
+    log_user_activity,
+    test_admin_create_user_direct
 )
 
 def show():
@@ -139,6 +140,10 @@ def benutzer_management():
             st.info("Keine Benutzer gefunden")
     
     with col2:
+        
+        if st.button("🚧 Test: Admin-User direkt erstellen"):
+            test_admin_create_user_direct()
+
         # Benutzer bearbeiten, wenn einer ausgewählt ist
         if st.session_state.selected_user_id:
             selected_user = next((user for user in users if user['id'] == st.session_state.selected_user_id), None)
@@ -183,12 +188,21 @@ def benutzer_management():
             submit_button = st.form_submit_button("Benutzer erstellen", use_container_width=True)
             
             if submit_button:
+                st.write("📩 Registrierungsversuch startet...")
+                st.write("Eingegebene Daten:", new_name, new_email, new_role)
+
                 if not new_name or not new_email or not new_password:
-                    st.error("Bitte füllen Sie alle Felder aus")
+                    st.error("❌ Bitte füllen Sie alle Felder aus.")
                 else:
-                    if registrieren(new_email, new_password, new_name, new_role):
+                    result = registrieren(new_email, new_password, new_name, new_role)
+
+                    if result:
                         log_user_activity("Benutzer erstellt", {"email": new_email, "role": new_role})
+                        st.success("✅ Benutzer erfolgreich erstellt.")
                         st.rerun()
+                    else:
+                        st.error("❌ Benutzer konnte nicht erstellt werden. Siehe Fehlermeldung oben.")
+
 
 def design_einstellungen():
     """
@@ -250,7 +264,7 @@ def aktivitaetslog():
             
             # Details als JSON anzeigen, wenn vorhanden
             if 'details' in df.columns:
-                df['details'] = df['details'].apply(lambda x: json.loads(x) if x else None)
+                df['details'] = df['details'].apply(lambda x: json.dumps(json.loads(x), ensure_ascii=False, indent=2) if x else "")
             
             # Datum formatieren
             if 'created_at' in df.columns:
