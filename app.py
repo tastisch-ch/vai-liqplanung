@@ -6,6 +6,8 @@ from core.utils import chf_format
 from views import datenimport, planung, editor, analyse, simulation, fixkosten, mitarbeiter, reset, login, admin
 from datetime import date, timedelta
 from core.auth import initialisiere_auth_state, prüfe_session_gültigkeit, log_user_activity
+from core.auth_cookie import get_cookie_manager
+cookie_manager = get_cookie_manager()
 
 # ----------------------------------
 # 📱 App-Einstellungen

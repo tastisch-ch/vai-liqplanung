@@ -1,5 +1,33 @@
 import streamlit as st
-from core.auth import anmelden, abmelden, initialisiere_auth_state, prüfe_session_gültigkeit, passwort_zuruecksetzen, magic_link_anmelden
+from core.auth import anmelden, abmelden, initialisiere_auth_state, prüfe_session_gültigkeit, passwort_zuruecksetzen
+
+# Magic Link Funktion in core/auth.py hinzufügen
+def magic_link_anmelden(email):
+    """
+    Sendet einen Magic Link zur angegebenen E-Mail-Adresse.
+    
+    Args:
+        email (str): E-Mail-Adresse des Benutzers
+        
+    Returns:
+        bool: True bei Erfolg, False bei Fehler
+    """
+    try:
+        # Supabase Magic Link senden
+        from core.storage import supabase
+        response = supabase.auth.sign_in_with_otp({
+            "email": email
+        })
+        
+        if response:
+            st.session_state.auth_message = f"Ein Magic Link wurde an {email} gesendet. Bitte prüfe deine E-Mails."
+            st.session_state.auth_message_type = "info"
+            return True
+    except Exception as e:
+        st.session_state.auth_message = f"Fehler beim Senden des Magic Links: {str(e)}"
+        st.session_state.auth_message_type = "error"
+    
+    return False
 
 def show():
     """
