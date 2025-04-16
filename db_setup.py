@@ -37,11 +37,3 @@ def create_admin_user(email, password, name):
         print(f"Fehler beim Erstellen des Admin-Benutzers: {str(e)}")
     
     return False
-
-# Beispiel für die Ausführung:
-if __name__ == "__main__":
-    # Datenbank einrichten
-    setup_database()
-    
-    # Admin-Benutzer erstellen
-    create_admin_user("support@vaios.ch", "Spegu@vaio$.2025!", "Administrator")
