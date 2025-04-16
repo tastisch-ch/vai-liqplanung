@@ -11,8 +11,7 @@ from core.auth import (
     benutzer_loeschen, 
     registrieren,
     speichere_benutzereinstellungen,
-    log_user_activity,
-    test_admin_create_user_direct
+    log_user_activity
 )
 
 def show():
@@ -75,7 +74,12 @@ def benutzer_management():
     """
     st.subheader("Benutzerverwaltung")
     
+    # Initialisierung von session_state Variablen - MUSS AM ANFANG STEHEN
+    if "selected_user_id" not in st.session_state:
+        st.session_state.selected_user_id = None
+    
     col1, col2 = st.columns([2, 1])
+    
     
     with col1:
         # Benutzerliste anzeigen
@@ -141,9 +145,6 @@ def benutzer_management():
     
     with col2:
         
-        if st.button("🚧 Test: Admin-User direkt erstellen"):
-            test_admin_create_user_direct()
-
         # Benutzer bearbeiten, wenn einer ausgewählt ist
         if st.session_state.selected_user_id:
             selected_user = next((user for user in users if user['id'] == st.session_state.selected_user_id), None)

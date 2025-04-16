@@ -167,8 +167,8 @@ if st.session_state.is_authenticated:
     nav_icons.append("box-arrow-right")
 else:
     # Navigationselemente für nicht angemeldete Benutzer
-    nav_options = ["Login"]
-    nav_icons = ["key"]
+    nav_options = [""]
+    nav_icons = [""]
 
 # WICHTIG: Konvertiere Listen zu Listen (nicht zu Sets), um JSON-Serialisierungsprobleme zu vermeiden
 nav_options = list(nav_options)
@@ -182,7 +182,7 @@ selected = option_menu(
     orientation="horizontal",
     default_index=0 if selected_tab is None else nav_options.index(selected_tab) if selected_tab in nav_options else 0,
     styles={
-        "container": {"padding": "0!important", "width": "100%", "margin": "0 0 1rem 0"},
+        "container": {"padding": "0!important", "width": "100%", "margin": "0 0 1rem 0; max-width: none;"},
         "icon": {"color": "#111", "font-size": "14px"},
         "nav-link": {"font-size": "14px", "text-align": "center", "margin": "0px", "--hover-color": "#eee", "padding": "10px 15px"},
         "nav-link-selected": {"background-color": st.session_state.design_settings.get("primary_color", "#4A90E2"), "color": "white"},
@@ -353,6 +353,12 @@ elif selected == "Admin":
         admin.show()
     else:
         st.error("Sie haben keine Berechtigung, auf diesen Bereich zuzugreifen")
+elif selected == "Reset":
+    if prüfe_session_gültigkeit() and st.session_state.is_admin:
+        admin.show()
+    else:
+        st.error("Sie haben keine Berechtigung, auf diesen Bereich zuzugreifen")
+
         
 # ----------------------------------
 # 👤 Footer

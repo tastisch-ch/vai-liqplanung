@@ -69,26 +69,44 @@ def anmelden(email, password, stay_logged_in=False):
             
             # Benutzerrolle überprüfen
             user_id = str(response.user.id)
-            user_data = supabase.table('profiles').select('*').eq('id', user_id).execute()
-
-            if not user_data.data:
-                print(f"Kein Profil gefunden für ID: {user_id}")
-            else:
-                print(f"Profil gefunden: {user_data.data[0]}")
             
-            print(f"Benutzerrolle überprüft: {user_data.data}")  # Debugging
+            # Direktes SQL-Statement verwenden, um Caching-Probleme zu vermeiden
+            admin_check = supabase.rpc(
+                'check_user_is_admin',
+                { 'user_id_param': user_id }
+            ).execute()
             
-            if user_data.data and user_data.data[0].get('role') == 'admin':
+            st.write("Admin-Check Ergebnis:", admin_check.data)  # Debug
+            
+            if admin_check.data and admin_check.data == True:
                 st.session_state.is_admin = True
-                print("Admin-Status gesetzt")  # Debugging
+                print(f"Admin-Status gesetzt für Benutzer {user_id}")
             else:
-                st.session_state.is_admin = False
+                # Fallback zur alten Methode
+                user_data = supabase.table('profiles').select('*').eq('id', user_id).execute()
                 
+                print(f"Profildaten für {user_id}:", user_data.data)  # Debug
+                
+                if user_data.data and user_data.data[0].get('role', '').lower() == 'admin':
+                    st.session_state.is_admin = True
+                    print(f"Admin-Status gesetzt für Benutzer {user_id} (Fallback-Methode)")
+                else:
+                    st.session_state.is_admin = False
+                    print(f"Kein Admin-Status für Benutzer {user_id}")
+            
             st.session_state.auth_message = "Erfolgreich angemeldet!"
             st.session_state.auth_message_type = "success"
             
             # Benutzereinstellungen laden
             lade_benutzereinstellungen(response.user.id)
+            
+            # Cookie speichern, falls aktiviert
+            if st.session_state.stay_logged_in:
+                try:
+                    from core.auth_cookie import save_auth_to_cookie
+                    save_auth_to_cookie(response.user, response.session, stay_logged_in)
+                except Exception as e:
+                    print(f"Fehler beim Speichern des Cookies: {e}")
             
             return True
             
@@ -97,6 +115,38 @@ def anmelden(email, password, stay_logged_in=False):
         st.session_state.auth_message_type = "error"
         
     return False
+    return False
+
+def debug_user_roles():
+    """
+    Debug-Funktion zur Anzeige aller Benutzerrollen
+    """
+    try:
+        # Alle Profile abrufen
+        user_profiles = supabase.table('profiles').select('*').execute()
+        
+        st.write("Alle Benutzerprofile:")
+        for profile in user_profiles.data:
+            st.write(f"ID: {profile.get('id')} | Name: {profile.get('name')} | Rolle: {profile.get('role')}")
+        
+        # Aktueller Benutzer
+        if st.session_state.is_authenticated and st.session_state.user:
+            st.write("Aktueller Benutzer:")
+            st.write(f"ID: {st.session_state.user.id}")
+            st.write(f"Admin-Status: {st.session_state.is_admin}")
+            
+            # Direkter Check
+            user_id = st.session_state.user.id
+            profile = supabase.table('profiles').select('*').eq('id', user_id).execute()
+            
+            if profile.data:
+                st.write(f"Profil in DB: {profile.data[0]}")
+                st.write(f"Rolle in DB: {profile.data[0].get('role')}")
+            else:
+                st.write("Kein Profil gefunden!")
+                
+    except Exception as e:
+        st.error(f"Debug-Fehler: {str(e)}")
 
 def abmelden():
     """
@@ -188,9 +238,10 @@ def is_read_only():
 
 def registrieren(email, password, name, role='user'):
     """
-    Neuen Benutzer registrieren (nur für Admins)
+    Neuen Benutzer registrieren mit RPC-Funktionen zur Umgehung von RLS
     """
     import traceback
+    import time
 
     if not st.session_state.is_admin:
         st.session_state.auth_message = "Nur Administratoren können neue Benutzer anlegen."
@@ -198,46 +249,59 @@ def registrieren(email, password, name, role='user'):
         return False
 
     try:
-        st.write("📤 Registrierungsversuch startet...")
-        print("🧪 Verwende Key mit Rolle:", supabase.auth.session().access_token)  # Debug
-
-        # 1. Benutzer in Supabase Auth anlegen
-        response = supabase.auth.admin.create_user({
+        st.write("📤 Benutzerregistrierung mit RPC-Funktionen...")
+        
+        # Standard-Registrierung verwenden
+        auth_data = {
             "email": email,
             "password": password,
-            "email_confirm": False,
-            "user_metadata": {
-                "name": name,
-                "display_name": name
+            "options": {
+                "data": {
+                    "name": name,
+                    "display_name": name,
+                    "role": role
+                }
             }
-        })
-
-        st.write("✅ Create User Response:", response)
-
-        if not response.user:
+        }
+        
+        # Erstellen des Benutzers
+        response = supabase.auth.sign_up(auth_data)
+        
+        if not response or not response.user:
             st.error("❌ Kein Benutzerobjekt im Response – Benutzer wurde nicht korrekt angelegt.")
+            st.write("Response:", response)
             return False
 
         user_id = response.user.id
-
-        # 2. Versuch: Profil-Datensatz updaten, falls er schon existiert (z. B. durch Trigger)
-        profile_data = {
-            "name": name,
-            "role": role,
-            "updated_at": datetime.now().isoformat()
-        }
-
-        update_response = supabase.table("profiles").update(profile_data).eq("id", user_id).execute()
-        st.write("📥 Update Profile Response:", update_response)
-
-        # 3. Optional: prüfen, ob gar kein Eintrag existierte → dann insert versuchen
-        if not update_response.data:
-            st.warning("⚠️ Kein bestehendes Profil gefunden – Insert wird versucht.")
-
-            profile_data["id"] = user_id
-            profile_data["created_at"] = datetime.now().isoformat()
-            insert_response = supabase.table("profiles").insert(profile_data).execute()
-            st.write("📥 Insert Profile Response:", insert_response)
+        st.success(f"✅ Benutzer erstellt mit ID: {user_id}")
+        
+        # Profil über RPC-Funktion erstellen
+        st.write("📝 Erstelle Profil über RPC-Funktion...")
+        
+        try:
+            # RPC-Funktion zur Umgehung von RLS
+            rpc_response = supabase.rpc(
+                'insert_profile',
+                {
+                    'user_id': user_id,
+                    'user_name': name,
+                    'user_role': role,
+                    'user_email': email
+                }
+            ).execute()
+            
+            st.write("📥 RPC Response:", rpc_response)
+            
+            if rpc_response.error:
+                st.error(f"❌ RPC-Fehler: {rpc_response.error}")
+                return False
+                
+            st.success("✅ Profil wurde über RPC erstellt")
+            
+        except Exception as rpc_error:
+            st.error(f"❌ Fehler beim Erstellen des Profils via RPC: {rpc_error}")
+            st.warning("⚠️ Der Benutzer wurde erstellt, aber das Profil konnte nicht angelegt werden.")
+            return False
 
         # Erfolgreich
         st.session_state.auth_message = f"✅ Benutzer {email} erfolgreich erstellt."
@@ -245,32 +309,46 @@ def registrieren(email, password, name, role='user'):
         return True
 
     except Exception as e:
-        st.session_state.auth_message = f"❌ Benutzerregistrierung fehlgeschlagen: {str(e)}"
+        error_message = str(e)
+        st.session_state.auth_message = f"❌ Benutzerregistrierung fehlgeschlagen: {error_message}"
         st.session_state.auth_message_type = "error"
         st.error("🔍 Fehlerdetails:")
         st.exception(traceback.format_exc())
 
     return False
 
-
 def benutzer_auflisten():
     """
-    Liste aller Benutzer aus der profiles-Tabelle abrufen (nur für Admins)
+    Liste aller Benutzer abrufen (nur für Admins) unter Verwendung einer RPC-Funktion
     """
     if not st.session_state.is_admin:
         return []
-        
+
     try:
-        response = supabase.table('profiles').select('*').execute()
+        # RPC-Funktion ausführen
+        response = supabase.rpc('get_all_profiles').execute()
+
+        # Falls keine Daten vorhanden sind, Fallback
+        if not response.data:
+            st.warning("RPC hat keine Daten zurückgegeben. Fallback wird versucht.")
+            try:
+                response = supabase.table('profiles').select('*').execute()
+                return response.data if response.data else []
+            except Exception as fallback_error:
+                st.error(f"Auch Fallback fehlgeschlagen: {fallback_error}")
+                return []
+
         return response.data
+
     except Exception as e:
         st.session_state.auth_message = f"Fehler beim Abrufen der Benutzerliste: {str(e)}"
         st.session_state.auth_message_type = "error"
         return []
 
+
 def benutzer_bearbeiten(user_id, data):
     """
-    Benutzerdaten aktualisieren (nur für Admins)
+    Benutzerdaten aktualisieren (nur für Admins) mit RPC-Funktion
     """
     if not st.session_state.is_admin:
         st.session_state.auth_message = "Nur Administratoren können Benutzer bearbeiten."
@@ -278,7 +356,17 @@ def benutzer_bearbeiten(user_id, data):
         return False
         
     try:
-        supabase.table('profiles').update(data).eq('id', user_id).execute()
+        # Verwende die RPC-Funktion zum Aktualisieren des Profils
+        response = supabase.rpc('insert_profile', {
+            'user_id': user_id,
+            'user_name': data.get('name', ''),
+            'user_role': data.get('role', 'user'),
+            'user_email': data.get('email', '')
+        }).execute()
+        
+        if response.error:
+            raise Exception(f"RPC-Fehler: {response.error}")
+            
         st.session_state.auth_message = "Benutzerdaten erfolgreich aktualisiert."
         st.session_state.auth_message_type = "success"
         return True

@@ -152,11 +152,19 @@ def logged_in_ui():
     """
     user = st.session_state.user
     
-    st.success(f"Sie sind angemeldet als: {user.email}")
+    # Verbesserte Anzeige des Benutzernamens
+    user_name = "Unknown"
     
-    if st.session_state.is_admin:
-        st.info("Sie haben Administratorrechte")
+    # Verschiedene mögliche Orte für den Benutzernamen prüfen
+    if hasattr(user, 'name'):
+        user_name = user.name
+    elif hasattr(user, 'user_metadata') and user.user_metadata and 'name' in user.user_metadata:
+        user_name = user.user_metadata['name']
+    elif hasattr(user, 'email'):
+        user_name = user.email  # Fallback auf E-Mail
     
+    st.success(f"Sie sind angemeldet als: {user_name}")
+
     if st.button("Abmelden", use_container_width=True):
         abmelden()
         st.rerun()

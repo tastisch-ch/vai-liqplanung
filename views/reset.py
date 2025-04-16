@@ -32,7 +32,7 @@ def show():
         if st.button("🚨 Jetzt zurücksetzen"):
             try:
                 # Datenlöschung nur für den angemeldeten Benutzer, wenn nicht Admin
-                reset_all_data(user_id=user_id if not st.session_state.is_admin else None)
+                reset_all_data()
                 
                 # Aktivität protokollieren
                 log_user_activity("App zurückgesetzt", {
