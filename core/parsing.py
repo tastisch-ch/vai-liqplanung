@@ -37,24 +37,63 @@ def parse_date_swiss_fallback(date_str):
 # 🦡 HTML-Daten importieren & parsen
 # ----------------------------------
 def parse_html_output(html_string):
+    """
+    Parst HTML-Daten aus E-Banking für den Import mit robuster Fehlerbehandlung.
+    """
+    import re
+    
+    # Überprüfung auf leere Eingabe
+    if not html_string or html_string.strip() == "":
+        return pd.DataFrame(columns=['Date', 'Type', 'Details', 'Amount', 'Currency', 'Balance'])
+        
     soup = BeautifulSoup(html_string, 'html.parser')
     rows = soup.find_all('tr')
     data = []
+    
     for row in rows:
-        cells = row.find_all('td')
-        if not cells:
+        try:
+            cells = row.find_all('td')
+            if not cells or len(cells) < 6:
+                continue
+
+            # Robust gegenüber verschiedenen HTML-Strukturen für das Datum
+            date_span = cells[0].find('span', class_='print')
+            if date_span:
+                date_str = date_span.text.strip()
+            else:
+                # Fallback: direkter Text oder andere Strukturen
+                date_str = cells[0].text.strip()
+                
+            date = parse_date_swiss_fallback(date_str)
+            
+            # Transaktionstyp
+            type = cells[1].text.strip()
+            if type == "Dauerauftrag":
+                continue  # Ignoriere Daueraufträge
+                
+            # Details (verschiedene Strukturen behandeln)
+            details_span = cells[2].find('span', class_='text')
+            if details_span:
+                details = details_span.text.strip()
+            else:
+                details = cells[2].text.strip()
+                
+            # Betrag, Währung und Kontostand
+            amount_text = cells[3].text.strip()
+            # Entferne Tausendertrennzeichen und ersetze Komma durch Punkt
+            amount = re.sub(r"['\s]", "", amount_text).replace(",", ".")
+            
+            currency = cells[4].text.strip() if len(cells) > 4 else "CHF"
+            balance = cells[5].text.strip() if len(cells) > 5 else ""
+
+            # Datum validieren, um ungültige Einträge auszufiltern
+            if pd.notna(date):
+                data.append([date, type, details, amount, currency, balance])
+            
+        except Exception as e:
+            # Fehler bei einer Zeile loggen und weitermachen
+            print(f"Fehler beim Verarbeiten einer Zeile: {e}")
             continue
 
-        date_str = cells[0].find('span', class_='print').text.strip()
-        date = parse_date_swiss_fallback(date_str)
-        type = cells[1].text.strip()
-        if type == "Dauerauftrag":
-            continue  # Ignoriere Daueraufträge
-        details = cells[2].find('span', class_='text').text.strip()
-        amount = cells[3].text.strip().replace("'", "")
-        currency = cells[4].text.strip()
-        balance = cells[5].text.strip()
-
-        data.append([date, type, details, amount, currency, balance])
-
+    # DataFrame zurückgeben (auch wenn leer)
     return pd.DataFrame(data, columns=['Date', 'Type', 'Details', 'Amount', 'Currency', 'Balance'])

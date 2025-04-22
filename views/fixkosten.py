@@ -33,8 +33,17 @@ def show():
     
     # Callback-Funktion für das Zurücksetzen der Eingabefelder
     def reset_input_fields():
-        st.session_state.neu_name = ""
-        st.session_state.neu_betrag = 0.0
+        # Statt direkter Zuweisung, Schlüssel löschen
+        if "neu_name" in st.session_state:
+            del st.session_state["neu_name"]
+        if "neu_betrag" in st.session_state:
+            del st.session_state["neu_betrag"]
+        if "neu_rhythmus" in st.session_state:
+            del st.session_state["neu_rhythmus"]
+        if "neu_start" in st.session_state:
+            del st.session_state["neu_start"]
+        if "neu_end" in st.session_state:
+            del st.session_state["neu_end"]
     
     # Erfolgs-Callback: Eingabefelder zurücksetzen und andere Aktionen ausführen
     def on_success_add():
