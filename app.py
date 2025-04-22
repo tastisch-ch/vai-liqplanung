@@ -355,7 +355,7 @@ elif selected == "Admin":
         st.error("Sie haben keine Berechtigung, auf diesen Bereich zuzugreifen")
 elif selected == "Reset":
     if prüfe_session_gültigkeit() and st.session_state.is_admin:
-        admin.show()
+        reset.show()
     else:
         st.error("Sie haben keine Berechtigung, auf diesen Bereich zuzugreifen")
 
