@@ -21,21 +21,12 @@ def load_fixkosten(user_id=None):
     return pd.DataFrame(data)
 
 def update_fixkosten_row(row_data, user_id=None):
-    """
-    Aktualisiert oder erstellt einen Fixkosten-Eintrag.
-    
-    Args:
-        row_data (dict): Die zu speichernden Fixkosten-Daten
-        user_id (str, optional): Benutzer-ID für Audit-Trails
-        
-    Returns:
-        list: Die gespeicherten Daten oder None bei Fehler
-    """
+    """Aktualisiert oder erstellt einen Fixkosten-Eintrag."""
     try:
         row_id = row_data.get("id")
         data = {
             "name": row_data.get("name"),
-            "betrag": float(row_data.get("betrag")),  # Sicherstellen, dass es ein Float ist
+            "betrag": float(row_data.get("betrag")),
             "rhythmus": row_data.get("rhythmus"),
             "start": (row_data.get("start").strftime("%Y-%m-%d") 
                       if hasattr(row_data.get("start"), "strftime") 
@@ -55,27 +46,28 @@ def update_fixkosten_row(row_data, user_id=None):
         try:
             # Wenn bereits ein Eintrag existiert, aktualisieren
             if row_id:
-                
                 # Überprüfe, ob der Eintrag existiert, bevor die Aktualisierung erfolgt
                 existing_entry = supabase.table("fixkosten").select("*").eq("id", row_id).execute()
                 
                 if not existing_entry.data:
                     print(f"Warnung: Kein Eintrag gefunden mit ID {row_id}. Füge neuen Eintrag ein.")
-                    data["id"] = row_id  # Stelle sicher, dass die ID beibehalten wird
-                    data["created_at"] = now  # Zeitstempel für die Erstellung
-                    data["updated_at"] = now  # Zeitstempel für die Aktualisierung
+                    data["id"] = row_id
+                    data["created_at"] = now
+                    data["updated_at"] = now
                     response = supabase.table("fixkosten").insert(data).execute()
                 else:
-                    data["updated_at"] = now  # Zeitstempel für die Aktualisierung
+                    data["updated_at"] = now
                     response = supabase.table("fixkosten").update(data).eq("id", row_id).execute()
             else:
                 # Sonst neu erstellen
                 data["id"] = str(uuid.uuid4())
-                data["created_at"] = now  # Zeitstempel für die Erstellung
-                data["updated_at"] = now  # Zeitstempel für die Aktualisierung
+                data["created_at"] = now
+                data["updated_at"] = now
                 print(f"Debugging - Erstelle neuen Eintrag mit ID: {data['id']}")
                 response = supabase.table("fixkosten").insert(data).execute()
             
+            # Erfolgreiches Update oder Insert
+            return response.data if response and hasattr(response, 'data') else True
         
         except Exception as supabase_error:
             print(f"Supabase-Fehler: {supabase_error}")
@@ -104,10 +96,28 @@ def delete_fixkosten_row(row_id, user_id=None):
         if user_id:
             # Hier könnte man einen Audit-Trail-Eintrag erstellen
             pass
+        
+        # Zuerst prüfen, ob der Eintrag existiert
+        check = supabase.table("fixkosten").select("id").eq("id", row_id).execute()
+        if not check.data:
+            print(f"Warnung: Kein Eintrag mit ID {row_id} zum Löschen gefunden.")
+            return False
             
-        supabase.table("fixkosten").delete().eq("id", row_id).execute()
-        return True
-    except Exception:
+        # Dann löschen
+        try:
+            response = supabase.table("fixkosten").delete().eq("id", row_id).execute()
+            
+            # Erfolg durch Prüfung, ob die Response vorhanden ist
+            return True if response is not None else False
+            
+        except Exception as delete_error:
+            print(f"Fehler beim Löschen: {delete_error}")
+            return False
+        
+    except Exception as e:
+        print(f"Fehler beim Löschen des Fixkosten-Eintrags: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def adjust_for_weekend(payment_date):

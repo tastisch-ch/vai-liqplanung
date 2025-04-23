@@ -3,6 +3,22 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 
 # ----------------------------------
+# 👥 Liste der zu ignorierenden Empfänger (Mitarbeiter)
+# ----------------------------------
+# Hier kannst du die Namen von Mitarbeitern eintragen, deren Zahlungen beim Import ignoriert werden sollen
+IGNORE_RECIPIENTS = [
+    "Christoph Richard",
+    "Alexandra Hürbin",
+    "Darko Todic",
+    "Carmen Ryser",
+    "Guido Parpan",
+    "Jana Trösch",
+    "Nina Flückiger",
+    "Werner Hügi",
+    # weitere Namen hier ergänzen...
+]
+
+# ----------------------------------
 # 🧠 Datum robust parsen (CH-Format)
 # ----------------------------------
 def parse_date_swiss_fallback(date_str):
@@ -77,6 +93,16 @@ def parse_html_output(html_string):
                 details = details_span.text.strip()
             else:
                 details = cells[2].text.strip()
+                
+            # Prüfe, ob der Empfänger in der Ignore-Liste ist
+            should_ignore = False
+            for recipient in IGNORE_RECIPIENTS:
+                if details.startswith(recipient):
+                    should_ignore = True
+                    break
+                    
+            if should_ignore:
+                continue  # Überspringe diese Zahlung
                 
             # Betrag, Währung und Kontostand
             amount_text = cells[3].text.strip()

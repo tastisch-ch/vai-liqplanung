@@ -87,29 +87,28 @@ def show():
         if submitted and not readonly_mode:  # Nur ausführen, wenn nicht im Lesemodus
             if not name.strip():
                 st.error("❌ Bitte gib eine Bezeichnung ein.")
-                return
                 
-            if betrag <= 0:
+            elif betrag <= 0:
                 st.error("❌ Bitte gib einen gültigen Betrag ein.")
-                return
                 
-            try:
-                new_entry = {
-                    "id": str(uuid.uuid4()),
-                    "name": name.strip(),
-                    "betrag": float(betrag),
-                    "rhythmus": rhythmus,
-                    "start": datum,
-                    "enddatum": enddatum if enddatum != datum else None,
-                    "user_id": user_id  # Benutzer-ID für Audit-Trail
-                }
-                update_fixkosten_row(new_entry)
-                
-                # Nach erfolgreicher Erstellung die Erfolgs-Callback-Funktion aufrufen
-                on_success_add()
-                
-            except Exception as e:
-                st.error(f"❌ Fehler beim Hinzufügen: {e}")
+            else:
+                try:
+                    new_entry = {
+                        "id": str(uuid.uuid4()),
+                        "name": name.strip(),
+                        "betrag": float(betrag),
+                        "rhythmus": rhythmus,
+                        "start": datum,
+                        "enddatum": enddatum if enddatum != datum else None,
+                        "user_id": user_id  # Benutzer-ID für Audit-Trail
+                    }
+                    update_fixkosten_row(new_entry)
+                    
+                    # Nach erfolgreicher Erstellung die Erfolgs-Callback-Funktion aufrufen
+                    on_success_add()
+                    
+                except Exception as e:
+                    st.error(f"❌ Fehler beim Hinzufügen: {e}")
 
     st.markdown("---")
 
