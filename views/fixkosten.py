@@ -102,13 +102,32 @@ def show():
                         "enddatum": enddatum if enddatum != datum else None,
                         "user_id": user_id  # Benutzer-ID für Audit-Trail
                     }
-                    update_fixkosten_row(new_entry)
+                    
+                    # Validierung vor dem Speichern
+                    if not (isinstance(datum, date) or isinstance(datum, datetime)):
+                        st.error("❌ Startdatum hat ein ungültiges Format.")
+                        return
+                        
+                    if enddatum and not (isinstance(enddatum, date) or isinstance(enddatum, datetime)):
+                        st.error("❌ Enddatum hat ein ungültiges Format.")
+                        return
+                    
+                    # Speichern mit besserer Fehlerbehandlung
+                    result = update_fixkosten_row(new_entry)
+                    
+                    if result is None:
+                        st.error("❌ Fehler beim Speichern in der Datenbank. Bitte prüfe die Logdatei.")
+                        return
                     
                     # Nach erfolgreicher Erstellung die Erfolgs-Callback-Funktion aufrufen
                     on_success_add()
                     
                 except Exception as e:
                     st.error(f"❌ Fehler beim Hinzufügen: {e}")
+                    # Zusätzliche Debug-Informationen
+                    print(f"Fehlerdetails beim Hinzufügen: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
 
     st.markdown("---")
 
@@ -232,18 +251,39 @@ def show():
                         else:
                             end_date = enddatum
                         
+                        # Validierung vor dem Speichern
+                        if not (isinstance(start, date) or isinstance(start, datetime)):
+                            st.error("❌ Startdatum hat ein ungültiges Format.")
+                            return
+                            
+                        if end_date and not (isinstance(end_date, date) or isinstance(end_date, datetime)):
+                            st.error("❌ Enddatum hat ein ungültiges Format.")
+                            return
+                        
+                        # Betrag sicherstellen
+                        try:
+                            betrag_float = float(betrag)
+                        except (ValueError, TypeError):
+                            st.error("❌ Betrag konnte nicht als Zahl interpretiert werden.")
+                            return
+                            
                         # Eintrag aktualisieren
                         changed_row = {
                             "id": row_id,
                             "name": name.strip(),
-                            "betrag": float(betrag),
+                            "betrag": betrag_float,
                             "rhythmus": rhythmus,
                             "start": start,
                             "enddatum": end_date,
                             "user_id": user_id  # Benutzer-ID beibehalten
                         }
                         
-                        update_fixkosten_row(changed_row)
+                        # Speichern mit besserer Fehlerbehandlung
+                        result = update_fixkosten_row(changed_row)
+                        
+                        if result is None:
+                            st.error("❌ Fehler beim Speichern in der Datenbank. Bitte prüfe die Logdatei.")
+                            return
                         
                         # Erfolgsrückmeldung
                         if stopped:
@@ -266,6 +306,10 @@ def show():
                         
                     except Exception as e:
                         st.error(f"❌ Fehler beim Speichern: {e}")
+                        # Zusätzliche Debug-Informationen
+                        print(f"Fehlerdetails beim Speichern: {str(e)}")
+                        import traceback
+                        traceback.print_exc()
             
             # Löschen-Button außerhalb des Forms - im Lesemodus deaktiviert
             if not readonly_mode:
